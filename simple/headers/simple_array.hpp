@@ -10,24 +10,19 @@ namespace simple {
 		typedef T* Iterator;
 		typedef const T* ConstIterator;
 
-		inline size_t size() const {
+		inline size_t Size() const {
 			return _size;
 		}
 
-		inline T* data() const {
+		inline T* Data() const {
 			return (T*)_data;
 		}
 
-		inline T& getIndexUnsafe(size_t index) {
+		inline T& GetIndexUnsafe(size_t index) {
 			return _data[index];
 		}
 
-		const T& operator[](size_t index) const {
-			assert(index < _size && "attempting to access array index past it's bounds!");
-			return _data[index];
-		}
-
-		constexpr T& operator[](size_t index) {
+		constexpr const T& operator[](size_t index) const {
 			assert(index < _size && "attempting to access array index past it's bounds!");
 			return _data[index];
 		}
