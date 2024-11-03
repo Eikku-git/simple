@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GLFW/glfw3.h"
+#include "simple_allocator.hpp"
 #include "simple_array.hpp"
 #include "simple_dynamic_array.hpp"
 #include "simple_math.hpp"
@@ -172,9 +173,9 @@ namespace simple {
 		static inline constexpr size_t last_key = static_cast<size_t>(Key::MaxEnum);
 		static inline constexpr size_t last_mouse_button = static_cast<size_t>(MouseButton::MaxEnum);
 
-		Input(Window& window);
-
 	private:
+
+		void Init(Window& window);
 
 		simple::Array<float, last_key> _keyValues{};
 		simple::Array<bool, last_key> _pressedKeys{};
@@ -192,26 +193,36 @@ namespace simple {
 
 		DVec2 _cursorPos;
 		DVec2 _deltaCursorPos;
+		friend class Window;
 	};
 
 	class Window {
 
+		Window(Input* pInput) : _pInput(pInput) {
+		}
+
+		inline bool IsNull() const noexcept{
+			return !_pGlfwWindow;
+		}
+
 		inline bool Init(uint32_t width, uint32_t height, const char* title, Monitor monitor) {
 			assert(monitor || width && height && "attempting to create a window with invalid arguments");
-			window = glfwCreateWindow(width, height, title, monitor, nullptr);
-			if (!window) {
+			_pGlfwWindow = glfwCreateWindow(width, height, title, monitor, nullptr);
+			if (!_pGlfwWindow) {
 				return false;
 			}
+			_pInput->Init(*this);
 			return true;
 		}
 
-		inline bool IsNull() const {
-			return !window;
+		inline void Terminate() {
+			glfwDestroyWindow(_pGlfwWindow);
 		}
 
 	private:
 
-		GLFWwindow* window = nullptr;
+		Input* _pInput;
+		GLFWwindow* _pGlfwWindow = nullptr;
 	};
 }
 
