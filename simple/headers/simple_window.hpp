@@ -1,6 +1,6 @@
 #pragma once
 
-#include "glfw/glfw-3.3.9/include"
+#include "GLFW/glfw3.h"
 #include "simple_array.hpp"
 #include "simple_dynamic_array.hpp"
 #include "simple_math.hpp"
@@ -10,6 +10,7 @@
 namespace simple {
 
 	class WindowSystem {
+	public:
 
 		static inline void Init() {
 			glfwInit();
@@ -24,6 +25,8 @@ namespace simple {
 
 	class Window;
 
+	class Lol {
+	};
 
 	enum class Key {
 		Space = 32,
@@ -173,17 +176,17 @@ namespace simple {
 
 	private:
 
-		simple::Array<float, last_key> _keyValues;
-		simple::Array<bool, last_key> _pressedKeys;
-		simple::Array<bool, last_key> _heldKeys;
-		simple::Array<bool, last_key> _releasedKeys;
+		simple::Array<float, last_key> _keyValues{};
+		simple::Array<bool, last_key> _pressedKeys{};
+		simple::Array<bool, last_key> _heldKeys{};
+		simple::Array<bool, last_key> _releasedKeys{};
 
-		simple::DynamicArray<Key> _activeKeys;
+		simple::DynamicArray<Key> _activeKeys{};
 
-		simple::Array<float, last_mouse_button> _mouseButtonValues;
-		simple::Array<bool, last_mouse_button> _pressedMouseButtons;
-		simple::Array<bool, last_mouse_button> _heldMouseButtons;
-		simple::Array<bool, last_mouse_button> _releasedMouseButtons;
+		simple::Array<float, last_mouse_button> _mouseButtonValues{};
+		simple::Array<bool, last_mouse_button> _pressedMouseButtons{};
+		simple::Array<bool, last_mouse_button> _heldMouseButtons{};
+		simple::Array<bool, last_mouse_button> _releasedMouseButtons{};
 
 		simple::DynamicArray<Key> _activeMouseButtons;
 
@@ -199,14 +202,16 @@ namespace simple {
 			if (!window) {
 				return false;
 			}
+			return true;
 		}
 
-		inline bool Initialized() const {
-			return window;
+		inline bool IsNull() const {
+			return !window;
 		}
 
 	private:
-		GLFWwindow* window;
+
+		GLFWwindow* window = nullptr;
 	};
 }
 
