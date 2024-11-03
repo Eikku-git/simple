@@ -1,5 +1,10 @@
 #pragma once
 
+#include "simple.hpp"
+#include "simple_algorithm.hpp"
+#include "simple_dynamic_array.hpp"
+#include "vulkan/vulkan_core.h"
+#include <cinttypes>
 #ifdef FRAMES_IN_FLIGHT
 #else
 #define FRAMES_IN_FLIGHT 2U
@@ -8,6 +13,7 @@
 #include "simple_logging.hpp"
 #include "simple_array.hpp"
 #include "vulkan/vulkan.h"
+#include <assert.h>
 #include <thread>
 #include <iostream>
 
@@ -81,9 +87,7 @@ namespace simple {
 
 	class Simple {
 	public:
-		inline Simple() : _backend(*this) {
-
-		}
+		inline Simple() : _backend(*this) {}
 		Backend& GetBackend();
 		void Terminate();
 	private:
@@ -137,27 +141,50 @@ namespace simple {
 		TransferDstOptimal = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 	};
 
+	typedef VkImageSubresourceRange ImageSubResourceRange;
+	typedef VkComponentMapping ImageComponentMapping;
+
+	enum class ImageViewType {
+		OneD = VK_IMAGE_VIEW_TYPE_1D,
+		TwoD = VK_IMAGE_VIEW_TYPE_2D,
+		ThreeD = VK_IMAGE_VIEW_TYPE_3D,
+		Cube = VK_IMAGE_VIEW_TYPE_CUBE,
+		OneDArray = VK_IMAGE_VIEW_TYPE_1D_ARRAY,
+		TwoDArray = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+		CubeArray = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY,
+	};
+
 	class Image {
 	public:
 
 		inline Image(Simple& engine) noexcept : _engine(engine) {}
 
-		inline bool createImage(ImageExtent extent, ImageFormat format, ImageUsages usage, 
+		inline Image(Image&& other) noexcept;
+
+		bool IsNull() const noexcept {
+			return _vkImage == VK_NULL_HANDLE || _vkDeviceMemory == VK_NULL_HANDLE;
+		}
+
+		inline bool CreateImage(ImageExtent extent, ImageFormat format, ImageUsages usage, 
 			ImageAspects aspect, uint32_t mipLevels = 1,
 			uint32_t arrayLayers = 1, ImageSampleBits samples = ImageSample_1Bit, 
 			ImageLayout initialLayout = ImageLayout::Undefined, ImageTiling tiling = ImageTiling::Optimal, 
-			ImageType type = ImageType::TwoD) {
+			ImageType type = ImageType::TwoD) noexcept {
+			if (!IsNull()) {
+				logError(this, "attempting to create image (function simple::Image::CreateImage) when an image is already created and not terminated!");
+				return false;
+			}
 			VkDeviceSize deviceSize = (VkDeviceSize)extent.width * extent.height;
-			return Succeeded(_createImage(nullptr, 0, static_cast<VkImageType>(type), static_cast<VkFormat>(format), 
+			return Succeeded(_CreateImage(nullptr, 0, static_cast<VkImageType>(type), static_cast<VkFormat>(format), 
 				extent, mipLevels, arrayLayers, static_cast<VkSampleCountFlagBits>(samples), static_cast<VkImageTiling>(tiling), usage,
 				VK_SHARING_MODE_EXCLUSIVE, 0, nullptr, static_cast<VkImageLayout>(initialLayout)));
 		}
 
-		inline VkResult _createImage(const void* pNext, VkImageCreateFlags flags, VkImageType imageType, VkFormat format, 
+		inline VkResult _CreateImage(const void* pNext, VkImageCreateFlags flags, VkImageType imageType, VkFormat format, 
 			VkExtent3D extent, uint32_t mipLevels, uint32_t arrayLayers, VkSampleCountFlagBits samples,
 			VkImageTiling tiling, VkImageUsageFlags usage, VkSharingMode sharingMode, uint32_t queueFamilyIndexCount,
 			const uint32_t* pQueueFamilyIndices, VkImageLayout initialLayout) {
-			assert(_vkImage == nullptr && "attempting to create image for simple::Image that already has a VkImage created!");
+			assert(IsNull() && "attempting to create image for simple::Image that already has a VkImage created!");
 			VkImageCreateInfo createInfo {
 				.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 				.pNext = pNext,
@@ -195,7 +222,7 @@ namespace simple {
 			}
 			vkResult = vkBindImageMemory(_engine._backend._device, _vkImage, _vkDeviceMemory, 0);
 			if (!Succeeded(vkResult)) {
-				logError(this, "failed to bind memory (function vkBindImageMemory) for simple::Image");
+				logError(this, "failed to bind image memory (function vkBindImageMemory) for simple::Image");
 				vkDestroyImage(_engine._backend._device, _vkImage, _engine._backend._vkAllocationCallbacks);
 				vkFreeMemory(_engine._backend._device, _vkDeviceMemory, _engine._backend._vkAllocationCallbacks);
 				return vkResult;
@@ -207,55 +234,32 @@ namespace simple {
 			return VK_SUCCESS;
 		}
 
-	private:
-
-		Simple& _engine;
-		VkImage _vkImage{};
-		VkDeviceMemory _vkDeviceMemory{};
-		ImageLayout _layout{};
-		ImageExtent _extent{};
-		uint32_t _arrayLayers{};
-		ImageFormat _format{};
-
-		friend class Simple;
-		friend class ImageView;
-	};
-
-	typedef VkImageSubresourceRange ImageSubResourceRange;
-	typedef VkComponentMapping ImageComponentMapping;
-
-	enum class ImageViewType {
-		OneD = VK_IMAGE_VIEW_TYPE_1D,
-		TwoD = VK_IMAGE_VIEW_TYPE_2D,
-		ThreeD = VK_IMAGE_VIEW_TYPE_3D,
-		Cube = VK_IMAGE_VIEW_TYPE_CUBE,
-		OneDArray = VK_IMAGE_VIEW_TYPE_1D_ARRAY,
-		TwoDArray = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-		CubeArray = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY,
-	};
-
-	class ImageView {
-	public:
-
-		inline ImageView(Image& image) noexcept : _image(image) {}
-
-		bool createImageView(ImageViewType viewType, const ImageComponentMapping& components, const ImageSubResourceRange& subresourceRange) {
-			return Succeeded(_createImageView(nullptr, 0, static_cast<VkImageViewType>(viewType), components, subresourceRange));
+		inline VkImageView CreateImageView(ImageViewType viewType, const ImageComponentMapping& components, const ImageSubResourceRange& subresourceRange) const noexcept {
+			if (IsNull()) {
+				logError(this, "attempting to create VkImageView with simple::Image that's null!");
+				return VK_NULL_HANDLE;
+			}
+			VkImageView vkImageView;
+			if (Succeeded(_CreateImageView(nullptr, 0, static_cast<VkImageViewType>(viewType), components, subresourceRange, vkImageView))) {
+				return vkImageView;
+			}
+			return VK_NULL_HANDLE;
 		}
 
-		VkResult _createImageView(const void* pNext, VkImageViewCreateFlags flags, VkImageViewType viewType,
-			VkComponentMapping components, VkImageSubresourceRange subresourceRange) {
+		inline VkResult _CreateImageView(const void* pNext, VkImageViewCreateFlags flags, VkImageViewType viewType,
+			VkComponentMapping components, VkImageSubresourceRange subresourceRange, VkImageView& out) const {
+			assert(IsNull() && "attempting to create VkImageView with simple::Image that's null!");
 			VkImageViewCreateInfo createInfo {
 				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 				.pNext = pNext,
 				.flags = flags,
-				.image = _image._vkImage,
+				.image = _vkImage,
 				.viewType = viewType,
-				.format = static_cast<VkFormat>(_image._format),
+				.format = static_cast<VkFormat>(_format),
 				.components = components,
 				.subresourceRange = subresourceRange
 			};
-			VkResult vkResult = vkCreateImageView(_image._engine._backend._device, &createInfo, _image._engine._backend._vkAllocationCallbacks, &_vkImageView);
+			VkResult vkResult = vkCreateImageView(_engine._backend._device, &createInfo, _engine._backend._vkAllocationCallbacks, &out);
 			if (!Succeeded(vkResult)) {
 				logError(this, "failed to create VkImageView (function vkCreateImageView) for simple::ImageView");
 				return vkResult;
@@ -263,9 +267,32 @@ namespace simple {
 			return VK_SUCCESS;
 		}
 
+		void Terminate() noexcept {
+			vkFreeMemory(_engine._backend._device, _vkDeviceMemory, _engine._backend._vkAllocationCallbacks);
+			_vkDeviceMemory = VK_NULL_HANDLE;
+			vkDestroyImage(_engine._backend._device, _vkImage, _engine._backend._vkAllocationCallbacks);
+			_vkImage = VK_NULL_HANDLE;
+			_layout = ImageLayout::Undefined;
+			_extent = { 0, 0, 0 };
+			_arrayLayers = 0;
+			_format = ImageFormat::Undefined;
+		}
+
+		inline ~Image() noexcept {
+			Terminate();
+		}
+
 	private:
 
-		Image& _image;
-		VkImageView _vkImageView{};
+		Simple& _engine;
+		VkImage _vkImage = VK_NULL_HANDLE;
+		VkDeviceMemory _vkDeviceMemory = VK_NULL_HANDLE;
+		ImageLayout _layout{};
+		ImageExtent _extent{};
+		uint32_t _arrayLayers{};
+		ImageFormat _format{};
+
+		friend class Simple;
+		friend class ImageView;
 	};
 }

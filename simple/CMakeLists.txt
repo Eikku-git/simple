@@ -29,6 +29,7 @@ add_subdirectory(libraries/tinyobjloader-release)
 
 add_library(simple STATIC
 	"src/simple.cpp"
+	"src/simple_window.cpp"
 )
 
 target_link_libraries(simple vulkan glfw tinyobjloader glslang)
