@@ -65,7 +65,6 @@ namespace simple {
 		Simple& _engine;
 		VkAllocationCallbacks* _vkAllocationCallbacks = VK_NULL_HANDLE;
 		Thread _mainThread{};
-		Window _window{};
 		VkInstance _vkInstance{};
 		VkPhysicalDevice _vkPhysicalDevice{}; 
 		VkSurfaceKHR _vkSurfaceKHR{};
@@ -87,10 +86,11 @@ namespace simple {
 
 	class Simple {
 	public:
-		inline Simple() : _backend(*this) {}
+		inline Simple(Window& window) : _backend(*this), _window(window) {}
 		Backend& GetBackend();
 		void Terminate();
 	private:
+		Window& _window;
 		Backend _backend;
 		friend class Backend;
 		friend class Image;
