@@ -39,4 +39,15 @@ namespace simple {
 	inline T Max(T t0, T t1) {
 		return t0 < t1 ? t1 : t0;
 	}
+
+	template<typename T, typename Iter, typename ConstIter>
+	inline Iter Find(const T& val, Iter first, ConstIter end) {
+		for (; first != end;) {
+			if (val == *first) {
+				break;
+			}
+			++first;
+		}
+		return first;
+	}
 }
