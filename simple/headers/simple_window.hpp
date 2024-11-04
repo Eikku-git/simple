@@ -189,7 +189,7 @@ namespace simple {
 		simple::Array<bool, last_mouse_button> _heldMouseButtons{};
 		simple::Array<bool, last_mouse_button> _releasedMouseButtons{};
 
-		simple::DynamicArray<Key> _activeMouseButtons;
+		simple::DynamicArray<MouseButton> _activeMouseButtons;
 
 		DVec2 _cursorPos;
 		DVec2 _deltaCursorPos;
@@ -197,8 +197,11 @@ namespace simple {
 	};
 
 	class Window {
+	public:
 
-		Window(Input* pInput) : _pInput(pInput) {
+		inline Window(Window&& other) noexcept : _pGlfwWindow(other._pGlfwWindow), _pInput(other._pInput) {
+			other._pGlfwWindow = nullptr;
+			other._pInput = nullptr;
 		}
 
 		inline bool IsNull() const noexcept{
@@ -221,8 +224,8 @@ namespace simple {
 
 	private:
 
-		Input* _pInput;
 		GLFWwindow* _pGlfwWindow = nullptr;
+		Input* _pInput = nullptr;
 	};
 }
 
