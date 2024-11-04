@@ -86,11 +86,11 @@ namespace simple {
 
 	class Simple {
 	public:
-		inline Simple(Window& window) : _backend(*this), _window(window) {}
+		inline Simple(Window&& window) : _backend(*this), _window(std::move(window)) {}
 		Backend& GetBackend();
 		void Terminate();
 	private:
-		Window& _window;
+		Window _window;
 		Backend _backend;
 		friend class Backend;
 		friend class Image;
