@@ -3,6 +3,7 @@
 #include "simple_allocator.hpp"
 #include <assert.h>
 #include <cstdint>
+#include <variant>
 
 namespace simple {
 
@@ -13,9 +14,9 @@ namespace simple {
 		typedef T* Iterator;
 		typedef T* const ConstIterator;
 
-		inline DynamicArray() : _capacity(0), _size(0), _pData(nullptr), _allocator() {}
+		inline DynamicArray() : _allocator(), _capacity(0), _size(0), _pData(nullptr) {}
 
-		inline DynamicArray(Iterator begin, ConstIterator end) : _capacity(0), _size(0), _pData(nullptr), _allocator() {
+		inline DynamicArray(Iterator begin, ConstIterator end) : _allocator(), _capacity(0), _size(0), _pData(nullptr) {
 			ptrdiff_t diff = end - begin;
 			assert(diff >= 0 && diff < UINT32_MAX);
 			Reserve(diff);
@@ -26,7 +27,7 @@ namespace simple {
 		}
 
 		inline DynamicArray(const DynamicArray& other) noexcept 
-			: _capacity(other._capacity), _size(other._size), _pData(nullptr), _allocator() {
+			: _allocator(), _capacity(other._capacity), _size(other._size), _pData(nullptr) {
 			if (other._capacity == 0) {
 				return;
 			}
@@ -37,22 +38,14 @@ namespace simple {
 		}
 
 		inline DynamicArray(DynamicArray&& other) noexcept 
-			: _capacity(other._capacity), _size(other._size), _pData(other._pData) {
+			: _allocator(), _capacity(other._capacity), _size(other._size), _pData(other._pData) {
 			other._capacity = 0;
 			other._size = 0;
 			other._pData = nullptr;
 		}
 
-		inline DynamicArray(size_t size) {
-			_capacity = 1;
-			_size = size;
-			while (_capacity < _size) {
-				_capacity *= 2;
-			}
-			_pData = _allocator.allocate(_capacity);
-			for (uint32_t i = 0; i < _size; i++) {
-				_allocator.construct(&_pData[i]);
-			}
+		inline DynamicArray(uint32_t size) : _allocator(), _capacity(0), _size(0), _pData(nullptr) {
+			Resize(size);
 		}
 
 		constexpr inline size_t Capacity() const noexcept {
@@ -86,11 +79,9 @@ namespace simple {
 		}
 
 		inline DynamicArray& Resize(uint32_t size) {
-			uint32_t newCapacity = _capacity ? _capacity : 1;
-			while (size > newCapacity) {
-				newCapacity *= 2;
+			if (size > _capacity) {
+				Reserve(size);
 			}
-			Reserve(newCapacity);
 			_size = size;
 			for (size_t i = 0; i < _size; i++) {
 				_allocator.construct(&_pData[i]);
