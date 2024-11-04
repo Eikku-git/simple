@@ -3,7 +3,6 @@
 #include "simple_allocator.hpp"
 #include <assert.h>
 #include <cstdint>
-#include <variant>
 
 namespace simple {
 
@@ -164,6 +163,17 @@ namespace simple {
 			_size = 0;
 			_allocator.deallocate(_pData, 1);
 			_pData = nullptr;
+		}
+
+		inline Iterator Find(const T& value) {
+			Iterator begin = _pData[0];
+			for (; begin != _pData[_size];) {
+				if (*begin == value) {
+					break;
+				}
+				++begin;
+			}
+			return begin;
 		}
 
 		inline DynamicArray& Reverse() {
