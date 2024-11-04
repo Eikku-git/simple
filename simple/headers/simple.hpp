@@ -21,6 +21,18 @@ namespace simple {
 	
 	typedef uint32_t Flags;
 
+	enum ImageSampleBits {
+		ImageSample_1Bit = VK_SAMPLE_COUNT_1_BIT,
+		ImageSample_2Bit = VK_SAMPLE_COUNT_2_BIT,
+		ImageSample_4Bit = VK_SAMPLE_COUNT_4_BIT,
+		ImageSample_8Bit = VK_SAMPLE_COUNT_8_BIT,
+		ImageSample_16Bit = VK_SAMPLE_COUNT_16_BIT,
+		ImageSample_32Bit = VK_SAMPLE_COUNT_32_BIT,
+		ImageSample_64Bit = VK_SAMPLE_COUNT_64_BIT,
+	};
+
+	typedef Flags ImageSamples;
+
 	static inline bool Succeeded(VkResult vkResult) {
 		return vkResult == VK_SUCCESS;
 	}
@@ -72,8 +84,8 @@ namespace simple {
 		Queue _graphicsQueue{};
 		Queue _transferQueue{};
 		Queue _presentQueue{};
-		VkSampleCountFlagBits _maxColorMsaaSamples{};
-		VkSampleCountFlagBits _maxDepthMsaaSamples{};
+		ImageSamples _colorMsaaSamples{};
+		ImageSamples _depthMsaaSamples{};
 		simple::Array<VkSemaphore, FRAMES_IN_FLIGHT> _frameReadySemaphores{};
 		simple::Array<VkSemaphore, FRAMES_IN_FLIGHT> _frameFinishedSemaphores{};
 		simple::Array<VkFence, FRAMES_IN_FLIGHT> _inFlightFences{};
@@ -86,6 +98,8 @@ namespace simple {
 
 	class Simple {
 	public:
+		constexpr static inline const char* engine_name = "Simple";
+		constexpr static inline const char* app_name = "Simple";
 		inline Simple(Window&& window) : _backend(*this), _window(std::move(window)) {}
 		Backend& GetBackend();
 		void Terminate();
@@ -106,18 +120,6 @@ namespace simple {
 		R8G8B8A8_SRGB = VK_FORMAT_R8G8B8A8_SRGB,
 		B8G8R8A8_SRGB = VK_FORMAT_B8G8R8A8_SRGB,
 	};
-
-	enum ImageSampleBits {
-		ImageSample_1Bit = VK_SAMPLE_COUNT_1_BIT,
-		ImageSample_2Bit = VK_SAMPLE_COUNT_2_BIT,
-		ImageSample_4Bit = VK_SAMPLE_COUNT_4_BIT,
-		ImageSample_8Bit = VK_SAMPLE_COUNT_8_BIT,
-		ImageSample_16Bit = VK_SAMPLE_COUNT_16_BIT,
-		ImageSample_32Bit = VK_SAMPLE_COUNT_32_BIT,
-		ImageSample_64Bit = VK_SAMPLE_COUNT_64_BIT,
-	};
-
-	typedef Flags ImageSamples;
 
 	enum class ImageTiling {
 		Optimal = VK_IMAGE_TILING_OPTIMAL,
