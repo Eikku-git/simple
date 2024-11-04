@@ -8,7 +8,7 @@ namespace simple {
 	struct Array {
 
 		typedef T* Iterator;
-		typedef const T* ConstIterator;
+		typedef T* const ConstIterator;
 
 		inline size_t Size() const {
 			return _size;
@@ -27,7 +27,7 @@ namespace simple {
 			return _data[index];
 		}
 
-		constexpr inline Iterator begin() const noexcept {
+		inline Iterator begin() const noexcept {
 			return &_data[0];
 		}
 
