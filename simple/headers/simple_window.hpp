@@ -222,6 +222,10 @@ namespace simple {
 			glfwDestroyWindow(_pGlfwWindow);
 		}
 
+		GLFWwindow* GetRawPointer() {
+			return _pGlfwWindow;
+		}
+
 	private:
 
 		GLFWwindow* _pGlfwWindow = nullptr;
