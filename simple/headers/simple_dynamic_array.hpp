@@ -47,11 +47,11 @@ namespace simple {
 			Resize(size);
 		}
 
-		constexpr inline size_t Capacity() const noexcept {
+		constexpr inline uint32_t Capacity() const noexcept {
 			return _capacity;
 		}
 
-		constexpr inline size_t Size() const noexcept {
+		constexpr inline uint32_t Size() const noexcept {
 			return _size;
 		}
 
