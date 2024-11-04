@@ -2,6 +2,7 @@
 
 #include "simple_allocator.hpp"
 #include <assert.h>
+#include <cstdint>
 
 namespace simple {
 
@@ -10,18 +11,28 @@ namespace simple {
 	public:
 
 		typedef T* Iterator;
-		typedef const T* ConstIterator;
+		typedef T* const ConstIterator;
 
-		inline DynamicArray() : _capacity(0), _size(0), _pData(nullptr) {}
+		inline DynamicArray() : _capacity(0), _size(0), _pData(nullptr), _allocator() {}
+
+		inline DynamicArray(Iterator begin, ConstIterator end) : _capacity(0), _size(0), _pData(nullptr), _allocator() {
+			ptrdiff_t diff = end - begin;
+			assert(diff >= 0 && diff < UINT32_MAX);
+			Reserve(diff);
+			for (; begin != end;) {
+				PushBack(*begin);
+				++begin;
+			}
+		}
 
 		inline DynamicArray(const DynamicArray& other) noexcept 
-			: _capacity(other._capacity), _size(other._size), _pData(nullptr) {
+			: _capacity(other._capacity), _size(other._size), _pData(nullptr), _allocator() {
 			if (other._capacity == 0) {
 				return;
 			}
-			_pData = GetAllocator().allocate(_capacity);
+			_pData = _allocator.allocate(_capacity);
 			for (size_t i = 0; i < other._size; i++) {
-				GetAllocator().construct(&_pData[i], other._pData[i]);
+				_allocator.construct(&_pData[i], other._pData[i]);
 			}
 		}
 
@@ -38,14 +49,10 @@ namespace simple {
 			while (_capacity < _size) {
 				_capacity *= 2;
 			}
-			_pData = GetAllocator().allocate(_capacity);
+			_pData = _allocator.allocate(_capacity);
 			for (uint32_t i = 0; i < _size; i++) {
-				GetAllocator().construct(&_pData[i]);
+				_allocator.construct(&_pData[i]);
 			}
-		}
-
-		constexpr inline Allocator GetAllocator() noexcept {
-			return Allocator();
 		}
 
 		constexpr inline size_t Capacity() const noexcept {
@@ -68,12 +75,12 @@ namespace simple {
 			while (_capacity < capacity) {
 				_capacity *= 2;
 			}
-			T* temp = GetAllocator().allocate(_capacity);
+			T* temp = _allocator.allocate(_capacity);
 			assert(temp && "failed to allocate memory!");
 			for (size_t i = 0; i < _size; i++) {
-				GetAllocator().construct(&temp[i], std::move(_pData[i]));
+				_allocator.construct(&temp[i], std::move(_pData[i]));
 			}
-			GetAllocator().deallocate(_pData, 1);
+			_allocator.deallocate(_pData, 1);
 			_pData = temp;
 			return *this;
 		}
@@ -86,16 +93,16 @@ namespace simple {
 			Reserve(newCapacity);
 			_size = size;
 			for (size_t i = 0; i < _size; i++) {
-				GetAllocator().construct(&_pData[i]);
+				_allocator.construct(&_pData[i]);
 			}
 			return *this;
 		}
 
 		inline Iterator PushBack(const T& value) {
 			if (_size >= _capacity) {
-				reserve((_capacity ? _capacity : 1) * 2);
+				Reserve((_capacity ? _capacity : 1) * 2);
 			}
-			GetAllocator().construct(&_pData[_size]);
+			_allocator.construct(&_pData[_size]);
 			_pData[_size++] = value;
 			return Back();
 		}
@@ -105,12 +112,12 @@ namespace simple {
 				return pushBack(value);
 			}
 			if (_size >= _capacity) {
-				reserve((_capacity ? _capacity : 1) * 2);
+				Reserve((_capacity ? _capacity : 1) * 2);
 			}
 			for (auto iter = &_pData[_size]; iter != where; iter--) {
-				GetAllocator().construct(iter, std::move(*(iter - 1)));
+				_allocator.construct(iter, std::move(*(iter - 1)));
 			}
-			GetAllocator().construct(where, value);
+			_allocator.construct(where, value);
 			++_size;
 			return where;
 		}
@@ -118,10 +125,10 @@ namespace simple {
 		template<typename... Args>
 		inline Iterator EmplaceBack(Args&&... args) {
 			if (_size >= _capacity) {
-				reserve((_capacity ? _capacity : 1) * 2);
+				Reserve((_capacity ? _capacity : 1) * 2);
 			}
-			GetAllocator().construct(&_pData[_size++], std::forward<Args>(args)...);
-			return back();
+			_allocator.construct(&_pData[_size++], std::forward<Args>(args)...);
+			return Back();
 		}
 
 		template<typename... Args>
@@ -130,12 +137,12 @@ namespace simple {
 				return emplaceBack(std::forward<Args>(args)...);
 			}
 			if (_size >= _capacity) {
-				reserve((_capacity ? _capacity : 1) * 2);
+				Reserve((_capacity ? _capacity : 1) * 2);
 			}
 			for (auto iter = &_pData[_size]; iter != where; iter--) {
-				GetAllocator().construct(iter, std::move(*(iter - 1)));
+				_allocator.construct(iter, std::move(*(iter - 1)));
 			}
-			GetAllocator().construct(where, std::forward<Args>(args)...);
+			_allocator.construct(where, std::forward<Args>(args)...);
 			++_size;
 			return where;
 		}
@@ -146,8 +153,8 @@ namespace simple {
 			if (iter == &_pData[_size]) {
 			}
 			while (iter != &_pData[_size - 1]) {
-				GetAllocator().destroy(iter);
-				GetAllocator().construct(iter, std::move(*(iter + 1)));
+				_allocator.destroy(iter);
+				_allocator.construct(iter, std::move(*(iter + 1)));
 				++iter;
 			}
 			--_size;
@@ -160,11 +167,11 @@ namespace simple {
 
 		inline void Clear() {
 			for (size_t i = 0; i < _size; i++) {
-				GetAllocator().destroy(&_pData[i]);
+				_allocator.destroy(&_pData[i]);
 			}
 			_capacity = 0;
 			_size = 0;
-			GetAllocator().deallocate(_pData, 1);
+			_allocator.deallocate(_pData, 1);
 			_pData = nullptr;
 		}
 
@@ -174,8 +181,8 @@ namespace simple {
 			}
 			for (uint32_t i = 0, j = _size - 1; i != j && i < j;) {
 				T temp(std::move(_pData[i]));
-				GetAllocator().construct(&_pData[i], std::move(_pData[j]));
-				GetAllocator().construct(&_pData[j], std::move(temp));
+				_allocator.construct(&_pData[i], std::move(_pData[j]));
+				_allocator.construct(&_pData[j], std::move(temp));
 				++i; --j;
 			}
 			return *this;
@@ -191,11 +198,11 @@ namespace simple {
 
 		~DynamicArray() noexcept {
 			for (size_t i = 0; i < _size; i++) {
-				GetAllocator().destroy(&_pData[i]);
+				_allocator.destroy(&_pData[i]);
 			}
 			_capacity = 0;
 			_size = 0;
-			GetAllocator().deallocate(_pData, 1);
+			_allocator.deallocate(_pData, 1);
 			_pData = nullptr;
 		}
 
@@ -207,14 +214,15 @@ namespace simple {
 		DynamicArray& operator=(const DynamicArray& other) {
 			_capacity = other._capacity;
 			_size = other._size;
-			_pData = GetAllocator().allocate(_capacity);
+			_pData = _allocator.allocate(_capacity);
 			for (uint32_t i = 0; i < _size; i++) {
-				GetAllocator().construct(&_pData[i], other._pData[i]);
+				_allocator.construct(&_pData[i], other._pData[i]);
 			}
 			return *this;
 		}	
 
 	private:
+		Allocator _allocator;
 		uint32_t _capacity;
 		uint32_t _size;
 		T* _pData;
