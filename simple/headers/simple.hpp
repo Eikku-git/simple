@@ -31,6 +31,12 @@ namespace simple {
 		ImageSample_64Bit = VK_SAMPLE_COUNT_64_BIT,
 	};
 
+	enum class ImageFormat {
+		Undefined = VK_FORMAT_UNDEFINED,
+		R8G8B8A8_SRGB = VK_FORMAT_R8G8B8A8_SRGB,
+		B8G8R8A8_SRGB = VK_FORMAT_B8G8R8A8_SRGB,
+	};
+
 	typedef Flags ImageSamples;
 
 	static inline bool Succeeded(VkResult vkResult) {
@@ -80,7 +86,7 @@ namespace simple {
 		VkInstance _vkInstance{};
 		VkPhysicalDevice _vkPhysicalDevice{}; 
 		VkSurfaceKHR _vkSurfaceKHR{};
-		VkDevice _device{};
+		VkDevice _vkDevice{};
 		Queue _graphicsQueue{};
 		Queue _transferQueue{};
 		Queue _presentQueue{};
@@ -90,6 +96,16 @@ namespace simple {
 		simple::Array<VkSemaphore, FRAMES_IN_FLIGHT> _frameFinishedSemaphores{};
 		simple::Array<VkFence, FRAMES_IN_FLIGHT> _inFlightFences{};
 		simple::Array<VkCommandBuffer, FRAMES_IN_FLIGHT> _renderingCommandBuffers{};
+		VkSwapchainKHR _vkSwapchainKHR{};
+		VkExtent2D _vkSwapchainExtent2D{};
+		VkSurfaceFormatKHR _vkSurfaceFormatKHR{};
+		VkPresentModeKHR _vkPresentModeKHR{};
+		simple::Array<VkImage, FRAMES_IN_FLIGHT> _swapchainImages{};
+
+		inline void CreateSwapchain() {
+
+		}
+
 		friend class Simple;
 		friend class Image;
 		friend class ImageView;
@@ -114,12 +130,6 @@ namespace simple {
 	typedef VkImageUsageFlags ImageUsages;
 	typedef VkImageAspectFlags ImageAspects;
 	typedef VkExtent3D ImageExtent;
-
-	enum class ImageFormat {
-		Undefined = VK_FORMAT_UNDEFINED,
-		R8G8B8A8_SRGB = VK_FORMAT_R8G8B8A8_SRGB,
-		B8G8R8A8_SRGB = VK_FORMAT_B8G8R8A8_SRGB,
-	};
 
 	enum class ImageTiling {
 		Optimal = VK_IMAGE_TILING_OPTIMAL,
@@ -204,29 +214,29 @@ namespace simple {
 				.pQueueFamilyIndices = pQueueFamilyIndices,
 				.initialLayout = initialLayout,
 			};
-			VkResult vkResult = vkCreateImage(_engine._backend._device, &createInfo, _engine._backend._vkAllocationCallbacks, &_vkImage);
+			VkResult vkResult = vkCreateImage(_engine._backend._vkDevice, &createInfo, _engine._backend._vkAllocationCallbacks, &_vkImage);
 			if (!Succeeded(vkResult)) {
 				logError(this, "failed to create VkImage (function vkCreateImage) for simple::Image");
 				return vkResult;
 			}
 			VkMemoryRequirements vkMemRequirements;
-			vkGetImageMemoryRequirements(_engine._backend._device, _vkImage, &vkMemRequirements);
+			vkGetImageMemoryRequirements(_engine._backend._vkDevice, _vkImage, &vkMemRequirements);
 			VkMemoryAllocateInfo vkAllocInfo {
 				.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 				.pNext = nullptr,
 				.allocationSize = vkMemRequirements.size,
 			};
-			vkResult = vkAllocateMemory(_engine._backend._device, &vkAllocInfo, _engine._backend._vkAllocationCallbacks, &_vkDeviceMemory);
+			vkResult = vkAllocateMemory(_engine._backend._vkDevice, &vkAllocInfo, _engine._backend._vkAllocationCallbacks, &_vkDeviceMemory);
 			if (!Succeeded(vkResult)) {
 				logError(this, "failed to allocate memory (function vkAllocateMemory) for simple::Image");
-				vkDestroyImage(_engine._backend._device, _vkImage, _engine._backend._vkAllocationCallbacks);
+				vkDestroyImage(_engine._backend._vkDevice, _vkImage, _engine._backend._vkAllocationCallbacks);
 				return vkResult;
 			}
-			vkResult = vkBindImageMemory(_engine._backend._device, _vkImage, _vkDeviceMemory, 0);
+			vkResult = vkBindImageMemory(_engine._backend._vkDevice, _vkImage, _vkDeviceMemory, 0);
 			if (!Succeeded(vkResult)) {
 				logError(this, "failed to bind image memory (function vkBindImageMemory) for simple::Image");
-				vkDestroyImage(_engine._backend._device, _vkImage, _engine._backend._vkAllocationCallbacks);
-				vkFreeMemory(_engine._backend._device, _vkDeviceMemory, _engine._backend._vkAllocationCallbacks);
+				vkDestroyImage(_engine._backend._vkDevice, _vkImage, _engine._backend._vkAllocationCallbacks);
+				vkFreeMemory(_engine._backend._vkDevice, _vkDeviceMemory, _engine._backend._vkAllocationCallbacks);
 				return vkResult;
 			}
 			_layout = static_cast<ImageLayout>(initialLayout);
@@ -261,7 +271,7 @@ namespace simple {
 				.components = components,
 				.subresourceRange = subresourceRange
 			};
-			VkResult vkResult = vkCreateImageView(_engine._backend._device, &createInfo, _engine._backend._vkAllocationCallbacks, &out);
+			VkResult vkResult = vkCreateImageView(_engine._backend._vkDevice, &createInfo, _engine._backend._vkAllocationCallbacks, &out);
 			if (!Succeeded(vkResult)) {
 				logError(this, "failed to create VkImageView (function vkCreateImageView) for simple::ImageView");
 				return vkResult;
@@ -270,9 +280,9 @@ namespace simple {
 		}
 
 		void Terminate() noexcept {
-			vkFreeMemory(_engine._backend._device, _vkDeviceMemory, _engine._backend._vkAllocationCallbacks);
+			vkFreeMemory(_engine._backend._vkDevice, _vkDeviceMemory, _engine._backend._vkAllocationCallbacks);
 			_vkDeviceMemory = VK_NULL_HANDLE;
-			vkDestroyImage(_engine._backend._device, _vkImage, _engine._backend._vkAllocationCallbacks);
+			vkDestroyImage(_engine._backend._vkDevice, _vkImage, _engine._backend._vkAllocationCallbacks);
 			_vkImage = VK_NULL_HANDLE;
 			_layout = ImageLayout::Undefined;
 			_extent = { 0, 0, 0 };
