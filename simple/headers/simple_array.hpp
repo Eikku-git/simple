@@ -4,14 +4,14 @@
 
 namespace simple {
 
-	template<typename T, size_t _size>
+	template<typename T, size_t size>
 	struct Array {
 
 		typedef T* Iterator;
 		typedef T* const ConstIterator;
 
-		inline size_t Size() const {
-			return _size;
+		constexpr inline size_t Size() const {
+			return size;
 		}
 
 		inline T* Data() const {
@@ -22,19 +22,20 @@ namespace simple {
 			return _data[index];
 		}
 
-		constexpr const T& operator[](size_t index) const {
-			assert(index < _size && "attempting to access array index past it's bounds!");
+		T& operator[](size_t index) const {
+			assert(index < size && "attempting to access array index past it's bounds!");
 			return _data[index];
 		}
+
 
 		inline Iterator begin() const noexcept {
 			return &_data[0];
 		}
 
 		constexpr inline ConstIterator end() const noexcept {
-			return &_data[_size];
+			return &_data[size];
 		}
 
-		T _data[_size];
+		T _data[size];
 	};
 }
