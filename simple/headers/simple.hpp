@@ -5,6 +5,7 @@
 #include "simple_dynamic_array.hpp"
 #include "vulkan/vulkan_core.h"
 #include <cinttypes>
+#include <pthread.h>
 #ifdef FRAMES_IN_FLIGHT
 #else
 #define FRAMES_IN_FLIGHT 2U
@@ -13,11 +14,11 @@
 #include "simple_logging.hpp"
 #include "simple_array.hpp"
 #include "simple_set.hpp"
+#include "simple_map.hpp"
 #include "vulkan/vulkan.h"
 #include <assert.h>
 #include <thread>
 #include <mutex>
-#include <iostream>
 
 namespace simple {
 
@@ -135,7 +136,9 @@ namespace simple {
 			other._vkTransferCommandPool = VK_NULL_HANDLE;
 		}
 
-		inline Thread(std::thread&& thread) : _stdThread(std::move(thread)), _stdThreadID(_stdThread.get_id()) {}
+		inline Thread(std::thread&& thread) : _stdThread(std::move(thread)) {
+			_stdThreadID = _stdThread.get_id();
+		}
 
 		inline std::thread::id GetID() const {
 			return _stdThreadID;
@@ -229,24 +232,26 @@ namespace simple {
 			return _mainThread;
 		}
 
-		inline Thread* GetThread(std::thread::id threadID) {
+		inline const Thread* GetThisThread() {
+			std::thread::id threadID = std::this_thread::get_id();
 			if (threadID == _mainThread._stdThreadID) {
 				return &_mainThread;
 			}
 			std::lock_guard<std::mutex> lock(_threadsMutex);
-			auto bucket = _threads.GetBucket(Thread::Hash()(threadID));
-			if (!bucket->second) {
-				return nullptr;
-			}
-			for (size_t i = 0; i < bucket->second; i++) {
-				if (bucket->first[i].first.GetID() == threadID) {
-					return &bucket->first[i].first;
-				}
+			auto pair = _threads.Find(threadID);
+			if (pair) {
+				return &pair->second;
 			}
 			return nullptr;
 		}
 
-		inline const Thread& NewThread() {
+		inline bool ThreadExists(std::thread& thread) {
+			std::lock_guard<std::mutex> lock(_threadsMutex);
+			return _threads.Contains(thread.get_id());
+		}
+
+		inline const Thread& NewThread(std::thread&& thread) {
+			return *_NewThread(std::move(thread));
 		}
 
 		inline CommandBuffer GetNewGraphicsCommandBuffer(const Thread& thread) {
@@ -257,7 +262,7 @@ namespace simple {
 
 		Simple& _engine;
 		VkAllocationCallbacks* _vkAllocationCallbacks = VK_NULL_HANDLE;
-		Set<Thread, Thread::Hash> _threads{};
+		Map<std::thread::id, Thread, Thread::Hash> _threads{};
 		std::mutex _threadsMutex{};
 		Thread _mainThread{};
 		DynamicArray<VkCommandBuffer> _queuedGraphicsCommandBuffers{};
@@ -283,9 +288,13 @@ namespace simple {
 		Array<VkImage, FRAMES_IN_FLIGHT> _swapchainImages{};
 		Array<VkImageView, FRAMES_IN_FLIGHT> _swapchainImageViews{};
 
-		inline Thread& _NewThread(std::thread&& thread) {
+		inline Thread* _NewThread(std::thread&& thread) {
 
 			std::lock_guard<std::mutex> lock(_threadsMutex);
+
+			std::thread::id threadID = thread.get_id();
+
+			assert(!_threads.Contains(threadID) && "attempting to create simple::Thread when the thread already exists!");
 
 			Thread newThread(std::move(thread));
 
@@ -305,10 +314,7 @@ namespace simple {
 			};
 			assert(Succeeded(vkCreateCommandPool(_vkDevice, &transformCommandPoolInfo, _vkAllocationCallbacks, &newThread._vkTransferCommandPool))&& "failed to create vulkan transfer command pool for simple::Thread");
 
-			auto pair = _threads.Emplace(std::move(newThread));
-			assert(pair.first && "failed to insert simple::Thread to tracked simple::Backend threads!");
-
-			return *pair.second;
+			return new(_threads[threadID]) Thread(std::move(newThread));
 		}
 
 		inline void _QueueGraphicsCommandBuffer(VkCommandBuffer commandBuffer) {
@@ -322,10 +328,10 @@ namespace simple {
 			std::lock_guard<std::mutex> lock(_threadsMutex);
 			vkDestroyCommandPool(_vkDevice, _mainThread._vkGraphicsCommandPool, _vkAllocationCallbacks);
 			vkDestroyCommandPool(_vkDevice, _mainThread._vkTransferCommandPool, _vkAllocationCallbacks);
-			for (Thread& thread : _threads) {
-				thread._stdThread.join();
-				vkDestroyCommandPool(_vkDevice, thread._vkGraphicsCommandPool, _vkAllocationCallbacks);
-				vkDestroyCommandPool(_vkDevice, thread._vkTransferCommandPool, _vkAllocationCallbacks);
+			for (auto& pair : _threads) {
+				pair.second._stdThread.join();
+				vkDestroyCommandPool(_vkDevice, pair.second._vkGraphicsCommandPool, _vkAllocationCallbacks);
+				vkDestroyCommandPool(_vkDevice, pair.second._vkTransferCommandPool, _vkAllocationCallbacks);
 			}
 			vkDeviceWaitIdle(_vkDevice);
 			for (size_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
