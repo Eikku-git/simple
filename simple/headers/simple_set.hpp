@@ -15,8 +15,10 @@ namespace simple {
 	class Set {
 	public:
 
+		typedef size_t HashType;
+		typedef uint8_t BucketSize;
 		typedef Tuple<T, bool> Element;
-		typedef Tuple<Array<Element, MaxBucketSize>, uint8_t> Bucket;
+		typedef Tuple<Array<Element, MaxBucketSize>, BucketSize> Bucket;
 
 		struct Iterator {	
 
@@ -46,7 +48,7 @@ namespace simple {
 			}
 
 			inline Iterator& operator=(const Iterator& other) {
-				_ptr = other._ptr;
+				_ptr = other._ptr;size_t
 				_parent = other._parent;
 				return *this;
 			}
@@ -92,13 +94,13 @@ namespace simple {
 			}
 			Bucket* temp = _buckets;
 			_buckets = Allocator().allocate(_capacity);
-			for (size_t i = 0; i < _capacity; i++) {
+			for (uint32_t i = 0; i < _capacity; i++) {
 				Allocator().construct(&_buckets[i]);
 			}
 			_elements.clear();
 			_elements.reserve(_capacity);
-			for (size_t i = 0; i < oldCapacity; i++) {
-				for (size_t j = 0; j < temp[i].second; j++) {
+			for (uint32_t i = 0; i < oldCapacity; i++) {
+				for (BucketSize j = 0; j < temp[i].second; j++) {
 					Emplace(std::move(temp[i].first[j].first));
 				}
 			}
@@ -106,7 +108,7 @@ namespace simple {
 		}
 
 		inline Tuple<bool, T*> Insert(const T& value) {
-			uint64_t hash = Hasher()(value);
+			HashType hash = Hasher()(value);
 			auto& bucket = _buckets[hash % _capacity];
 			if (bucket.second) {
 				for (const Element& element : bucket.first) {
@@ -131,7 +133,7 @@ namespace simple {
 		template<typename... Args>
 		inline Tuple<bool, T*> Emplace(Args&&... args) {
 			T value(std::forward<Args>(args)...);
-			uint64_t hash = Hasher()(value);
+			HashType hash = Hasher()(value);
 			Bucket& bucket = _buckets[hash % _capacity];
 			if (bucket.second) {
 				for (const Element& element : bucket.first) {
@@ -157,7 +159,7 @@ namespace simple {
 			if (_trash > 8) {
 				Cleanup();
 			}
-			uint64_t hash = Hasher()(value);
+			HashType hash = Hasher()(value);
 			auto& bucket = _buckets[hash % _capacity];
 			if (bucket.second) {
 				for (Element& element : bucket.first) {
@@ -174,7 +176,7 @@ namespace simple {
 		}
 
 		inline bool Contains(const T& value) {
-			uint64_t hash = Hasher()(value);
+			HashType hash = Hasher()(value);
 			auto& bucket = _buckets[hash % _capacity];
 			if (bucket.second == 0) {
 				return false;
@@ -187,8 +189,12 @@ namespace simple {
 			return false;
 		}
 
+		inline const Bucket* GetBucket(HashType hash) {
+			return _buckets[hash % _capacity];
+		}
+
 		inline const T* Find(const T& value) {
-			uint64_t hash = Hasher()(value);
+			HashType hash = Hasher()(value);
 			auto& bucket = _buckets[hash % _capacity];
 			if (bucket.second == 0) {
 				return nullptr;
