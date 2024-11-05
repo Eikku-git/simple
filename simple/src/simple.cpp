@@ -145,7 +145,10 @@ namespace simple {
 				&& "failed to create vulkan swapchain image view (function vkCreateImageView in function simple::Backend::_CreateSwapchain)");
 		}
 
-		CommandBuffer imageLayoutTransitionCommandBuffer(GetNewGraphicsCommandBuffer(GetThread(std::this_thread::get_id())));
+		Thread* thread = GetThread(std::this_thread::get_id());
+		assert(thread && "attempting to start a process on a thread that hasn't been created yet!");
+
+		CommandBuffer imageLayoutTransitionCommandBuffer(GetNewGraphicsCommandBuffer(*thread));
 		imageLayoutTransitionCommandBuffer.Allocate();
 		Array<VkImageMemoryBarrier, FRAMES_IN_FLIGHT> imageTransitionMemoryBarriers{};
 		for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
@@ -172,7 +175,9 @@ namespace simple {
 		imageLayoutTransitionCommandBuffer.Submit();
 	}
 
-	Backend::Backend(Simple& engine) : _engine(engine) {
+	Backend::Backend(Simple& engine) : _engine(engine) { 
+
+		_mainThread._stdThreadID = std::this_thread::get_id();
 
 		uint32_t glfwRequiredExtensionsCount{};
 		const char** glfwRequiredExtensions = glfwGetRequiredInstanceExtensions(&glfwRequiredExtensionsCount);
@@ -306,12 +311,27 @@ namespace simple {
 		vkGetDeviceQueue(_vkDevice, queueFamilyIndices[2], 0, &_presentQueue.vkQueue);
 		_presentQueue.index = queueFamilyIndices[3];
 
-		_mainThread = &_NewThread(std::this_thread::get_id());
+		VkCommandPoolCreateInfo mainGraphicsVkCommandPoolInfo {
+			.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+			.pNext = nullptr,
+			.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+			.queueFamilyIndex = _graphicsQueue.index
+		};
+		assert(Succeeded(vkCreateCommandPool(_vkDevice, &mainGraphicsVkCommandPoolInfo, _vkAllocationCallbacks, &_mainThread._vkGraphicsCommandPool)) && "failed to create vulkan graphics command pool for simple::Thread!");
+
+		VkCommandPoolCreateInfo mainTransformVkCommandPoolInfo{
+			.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+			.pNext = nullptr,
+			.flags = 0,
+			.queueFamilyIndex = _transferQueue.index
+		};
+		assert(Succeeded(vkCreateCommandPool(_vkDevice, &mainTransformVkCommandPoolInfo, _vkAllocationCallbacks, &_mainThread._vkTransferCommandPool))&& "failed to create vulkan transfer command pool for simple::Thread");
+
 
 		VkCommandBufferAllocateInfo vkRenderingCommandBufferAllocInfo {
 			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
 			.pNext = nullptr,
-			.commandPool = _mainThread->_vkGraphicsCommandPool,
+			.commandPool = _mainThread._vkGraphicsCommandPool,
 			.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
 			.commandBufferCount = FRAMES_IN_FLIGHT,
 		};
@@ -366,5 +386,6 @@ namespace simple {
 	}
 
 	Simple::~Simple() {
+		_backend._Terminate();
 	}
 }

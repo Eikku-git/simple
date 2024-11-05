@@ -20,7 +20,9 @@
 #include <iostream>
 
 namespace simple {
-	
+
+	class Simple;
+	class Backend;
 	typedef uint32_t Flags;
 
 	enum ImageSampleBits {
@@ -44,53 +46,6 @@ namespace simple {
 	static inline bool Succeeded(VkResult vkResult) {
 		return vkResult == VK_SUCCESS;
 	}
-
-	class Backend;
-
-	class Thread {
-	public:
-
-		std::thread::id GetID() const {
-			return _ID;
-		}
-
-		VkCommandPool GetGraphicsCommandPool() const {
-			return _vkGraphicsCommandPool;
-		}
-
-		VkCommandPool GetTransferCommandPool() const {
-			return _vkTransferCommandPool;
-		}
-
-		inline bool operator==(const Thread& other) const {
-			return _ID == other._ID;
-		}
-
-		struct Hash {
-
-			inline size_t operator()(const Thread& thread) {
-				return std::hash<std::thread::id>()(thread._ID);
-			}
-
-			inline size_t operator()(std::thread::id threadID) {
-				return std::hash<std::thread::id>()(threadID);
-			}
-		};
-
-	private:
-		std::thread::id _ID;
-		VkCommandPool _vkGraphicsCommandPool;
-		VkCommandPool _vkTransferCommandPool;
-
-		friend class Backend;
-	};
-
-	struct Queue {
-		VkQueue vkQueue{};
-		uint32_t index{};
-	};
-
-	class Simple;
 
 	namespace vulkan {
 
@@ -168,6 +123,62 @@ namespace simple {
 		};
 	}
 
+	class Thread {
+	public:
+
+		Thread() noexcept : _stdThread(std::thread{}) {}
+
+		inline Thread(Thread&& other) noexcept
+			: _stdThread(std::move(other._stdThread)), _stdThreadID(other._stdThreadID),
+				_vkGraphicsCommandPool(other._vkGraphicsCommandPool), _vkTransferCommandPool(other._vkTransferCommandPool) {
+			other._vkGraphicsCommandPool = VK_NULL_HANDLE;
+			other._vkTransferCommandPool = VK_NULL_HANDLE;
+		}
+
+		inline Thread(std::thread&& thread) : _stdThread(std::move(thread)), _stdThreadID(_stdThread.get_id()) {}
+
+		inline std::thread::id GetID() const {
+			return _stdThreadID;
+		}
+
+		inline VkCommandPool GetGraphicsCommandPool() const {
+			return _vkGraphicsCommandPool;
+		}
+
+		inline VkCommandPool GetTransferCommandPool() const {
+			return _vkTransferCommandPool;
+		}
+
+		inline bool operator==(const Thread& other) const {
+			return _stdThreadID == other._stdThreadID;
+		}
+
+		struct Hash {
+
+			inline size_t operator()(const Thread& thread) {
+				return std::hash<std::thread::id>()(thread._stdThreadID);
+			}
+
+			inline size_t operator()(std::thread::id thread) {
+				return std::hash<std::thread::id>()(thread);
+			}
+		};
+
+	private:
+
+		std::thread::id _stdThreadID{};
+		std::thread _stdThread;
+		VkCommandPool _vkGraphicsCommandPool{};
+		VkCommandPool _vkTransferCommandPool{};
+
+		friend class Backend;
+	};
+
+	struct Queue {
+		VkQueue vkQueue{};
+		uint32_t index{};
+	};
+
 	enum class ThreadCommandPool {
 		None = 0,
 		Graphics = 1,
@@ -215,21 +226,27 @@ namespace simple {
 		Backend(Simple& engine);
 
 		inline const Thread& GetMainThread() const {
-			return *_mainThread;
+			return _mainThread;
 		}
 
-		inline const Thread& GetThread(std::thread::id threadID) {
+		inline Thread* GetThread(std::thread::id threadID) {
+			if (threadID == _mainThread._stdThreadID) {
+				return &_mainThread;
+			}
 			std::lock_guard<std::mutex> lock(_threadsMutex);
 			auto bucket = _threads.GetBucket(Thread::Hash()(threadID));
 			if (!bucket->second) {
-				return _NewThread(threadID);
+				return nullptr;
 			}
 			for (size_t i = 0; i < bucket->second; i++) {
-				if (bucket->first[i].first._ID == threadID) {
-					return bucket->first[i].first;
+				if (bucket->first[i].first.GetID() == threadID) {
+					return &bucket->first[i].first;
 				}
 			}
-			return _NewThread(threadID);
+			return nullptr;
+		}
+
+		inline const Thread& NewThread() {
 		}
 
 		inline CommandBuffer GetNewGraphicsCommandBuffer(const Thread& thread) {
@@ -242,7 +259,7 @@ namespace simple {
 		VkAllocationCallbacks* _vkAllocationCallbacks = VK_NULL_HANDLE;
 		Set<Thread, Thread::Hash> _threads{};
 		std::mutex _threadsMutex{};
-		Thread* _mainThread;
+		Thread _mainThread{};
 		DynamicArray<VkCommandBuffer> _queuedGraphicsCommandBuffers{};
 		std::mutex _queuedGraphicsCommandBuffersMutex{};
 		VkInstance _vkInstance{};
@@ -266,12 +283,11 @@ namespace simple {
 		Array<VkImage, FRAMES_IN_FLIGHT> _swapchainImages{};
 		Array<VkImageView, FRAMES_IN_FLIGHT> _swapchainImageViews{};
 
-		inline Thread& _NewThread(std::thread::id threadID) {
+		inline Thread& _NewThread(std::thread&& thread) {
 
 			std::lock_guard<std::mutex> lock(_threadsMutex);
 
-			Thread newThread{};
-			newThread._ID = threadID;
+			Thread newThread(std::move(thread));
 
 			VkCommandPoolCreateInfo graphicsCommandPoolInfo {
 				.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -289,7 +305,7 @@ namespace simple {
 			};
 			assert(Succeeded(vkCreateCommandPool(_vkDevice, &transformCommandPoolInfo, _vkAllocationCallbacks, &newThread._vkTransferCommandPool))&& "failed to create vulkan transfer command pool for simple::Thread");
 
-			auto pair = _threads.Insert(newThread);
+			auto pair = _threads.Emplace(std::move(newThread));
 			assert(pair.first && "failed to insert simple::Thread to tracked simple::Backend threads!");
 
 			return *pair.second;
@@ -301,6 +317,24 @@ namespace simple {
 		}
 
 		void _CreateSwapchain();
+
+		inline void _Terminate() {
+			std::lock_guard<std::mutex> lock(_threadsMutex);
+			for (Thread& thread : _threads) {
+				thread._stdThread.join();
+				vkDestroyCommandPool(_vkDevice, thread._vkGraphicsCommandPool, _vkAllocationCallbacks);
+				vkDestroyCommandPool(_vkDevice, thread._vkTransferCommandPool, _vkAllocationCallbacks);
+			}
+			vkDeviceWaitIdle(_vkDevice);
+			for (size_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
+				vkDestroySemaphore(_vkDevice, _frameReadyVkSemaphores[i], _vkAllocationCallbacks);
+				vkDestroySemaphore(_vkDevice, _frameFinishedVkSemaphores[i], _vkAllocationCallbacks);
+				vkDestroyFence(_vkDevice, _inFlightVkFences[i], _vkAllocationCallbacks);
+				vkDestroyImageView(_vkDevice, _swapchainImageViews[i], _vkAllocationCallbacks);
+			}
+			vkDestroySwapchainKHR(_vkDevice, _vkSwapchainKHR, _vkAllocationCallbacks);
+			vkDestroyDevice(_vkDevice, _vkAllocationCallbacks);
+		}
 
 		friend class Simple;
 		friend class Image;
