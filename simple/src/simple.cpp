@@ -10,6 +10,34 @@
 
 namespace simple {
 
+	void simple::CommandBuffer::Allocate() {
+		assert(_vkCommandBuffer == VK_NULL_HANDLE && "attempting to allocate simple::CommandBuffer that's already allocated!");
+		VkCommandBufferAllocateInfo allocInfo {
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+			.pNext = nullptr,
+			.commandPool = _vkCommandPool,
+			.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+			.commandBufferCount = 1
+		};
+		assert(Succeeded(vkAllocateCommandBuffers(_backend._vkDevice, &allocInfo, &_vkCommandBuffer))
+			&& "failed to allocate command buffer (function simple::CommandBuffer::Allocate)");
+	}
+
+	void simple::CommandBuffer::Submit() {
+		assert(_vkCommandBuffer != VK_NULL_HANDLE && "attempting to submit simple::CommandBuffer that hasn't been allocated yet!");
+		switch (_threadCommandPool) {
+			case ThreadCommandPool::None:
+				// immediate submit 
+				break;
+			case ThreadCommandPool::Graphics:
+				_backend._QueueGraphicsCommandBuffer(_vkCommandBuffer);
+				break;
+			case ThreadCommandPool::Transfer:
+				// submit to transfer queue
+				break;
+		};
+	}
+
 #define _DEBUG
 #ifdef _DEBUG
 	constexpr size_t layers_to_enable_count = 1;
@@ -110,6 +138,7 @@ namespace simple {
 					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 					.baseMipLevel = 0,
 					.levelCount = 1,
+					.baseArrayLayer = 0,
 					.layerCount = 1,
 				}
 			};
@@ -117,7 +146,32 @@ namespace simple {
 				&& "failed to create vulkan swapchain image view (function vkCreateImageView in function simple::Backend::_CreateSwapchain)");
 		}
 
-		VkCommandBuffer swapchainImageLayoutTransitionsCommandBuffer{};
+		CommandBuffer imageLayoutTransitionCommandBuffer(GetNewGraphicsCommandBuffer(GetThread(std::this_thread::get_id())));
+		imageLayoutTransitionCommandBuffer.Allocate();
+
+		Array<VkImageMemoryBarrier, FRAMES_IN_FLIGHT> imageTransitionMemoryBarriers{};
+		for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
+			imageTransitionMemoryBarriers[i].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			imageTransitionMemoryBarriers[i].pNext = nullptr;
+			imageTransitionMemoryBarriers[i].srcAccessMask = 0;
+			imageTransitionMemoryBarriers[i].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			imageTransitionMemoryBarriers[i].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			imageTransitionMemoryBarriers[i].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			imageTransitionMemoryBarriers[i].srcQueueFamilyIndex = _graphicsQueue.index;
+			imageTransitionMemoryBarriers[i].dstQueueFamilyIndex = _graphicsQueue.index;
+			imageTransitionMemoryBarriers[i].image = _swapchainImages[i];
+			imageTransitionMemoryBarriers[i].subresourceRange = {
+				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1,
+			};
+		}
+		vkCmdPipelineBarrier(imageLayoutTransitionCommandBuffer.Begin(), image_transition_src_stage_mask, image_transition_dst_stage_mask, 
+		0, 0, nullptr, 0, nullptr, FRAMES_IN_FLIGHT, imageTransitionMemoryBarriers.Data());
+		imageLayoutTransitionCommandBuffer.End();
+		imageLayoutTransitionCommandBuffer.Submit();
 	}
 
 	Backend::Backend(Simple& engine) : _engine(engine) {
