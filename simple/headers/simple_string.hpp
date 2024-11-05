@@ -314,10 +314,10 @@ namespace simple {
 		}
 
 		struct Hash {
-			inline uint64_t operator()(const String& string) const {
-				uint64_t h = 37;
+			inline size_t operator()(const String& string) const {
+				size_t h = 37;
 				for (char c : string) {
-					h = (h * 54059) ^ ((uint64_t)c * 76963);
+					h = (h * 54059) ^ ((size_t)c * 76963);
 				}
 				return h;
 			}
