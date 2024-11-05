@@ -12,9 +12,11 @@
 #include "simple_window.hpp"
 #include "simple_logging.hpp"
 #include "simple_array.hpp"
+#include "simple_set.hpp"
 #include "vulkan/vulkan.h"
 #include <assert.h>
 #include <thread>
+#include <mutex>
 #include <iostream>
 
 namespace simple {
@@ -47,24 +49,38 @@ namespace simple {
 	public:
 
 		std::thread::id GetID() const {
-			return ID;
+			return _ID;
+			vkResult = vkAllocateMemory(_engine._backend._vkDevice, &vkAllocInfo, _engine._backend._vkAllocationCallbacks, &_vkDeviceMemory);
 		}
 
-		VkCommandPool GetGraphicsCommandPool() {
-			return graphicsCommandPool;
+		VkCommandPool GetGraphicsCommandPool() const {
+			return _vkGraphicsCommandPool;
 		}
 
-		VkCommandPool GetTransferCommandPool() {
-			return transferCommandPool;
+		VkCommandPool GetTransferCommandPool() const {
+			return _vkTransferCommandPool;
 		}
+
+		inline bool operator==(const Thread& other) const {
+			return _ID == other._ID;
+		}
+
+		struct Hash {
+
+			inline size_t operator()(const Thread& thread) {
+				return std::hash<std::thread::id>()(thread._ID);
+			}
+
+			inline size_t operator()(std::thread::id threadID) {
+				return std::hash<std::thread::id>()(threadID);
+			}
+		};
 
 	private:
-		std::thread::id ID;
-		VkCommandPool graphicsCommandPool;
-		VkCommandPool transferCommandPool;
-		inline bool operator=(const Thread& other) const {
-			return ID == other.ID;
-		}
+		std::thread::id _ID;
+		VkCommandPool _vkGraphicsCommandPool;
+		VkCommandPool _vkTransferCommandPool;
+
 		friend class Backend;
 	};
 
@@ -75,16 +91,115 @@ namespace simple {
 
 	class Simple;
 
+	namespace vulkan {
+
+		struct PhysicalDeviceInfo {
+			VkPhysicalDevice vkPhysicalDevice;
+			VkSurfaceKHR vkSurfaceKHR;
+			VkPhysicalDeviceFeatures vkPhysicalDeviceFeatures;
+			VkPhysicalDeviceProperties vkPhysicalDeviceProperties;
+			DynamicArray<VkExtensionProperties> vkExtensionProperties{};
+			DynamicArray<VkQueueFamilyProperties> vkQueueFamilyProperties{};
+			uint32_t graphicsQueueFamilyIndex, transferQueueFamilyIndex, presentQueueFamilyIndex{};
+			bool graphicsQueueFound, transferQueueFound, presentQueueFound{};
+			VkSurfaceCapabilitiesKHR vkSurfaceCapabilitiesKHR;
+			DynamicArray<VkSurfaceFormatKHR> vkSurfaceFormatsKHR{};
+			DynamicArray<VkPresentModeKHR> vkPresentModesKHR{};
+
+			inline PhysicalDeviceInfo() {}
+
+			inline PhysicalDeviceInfo(VkPhysicalDevice vkPhysicalDevice, VkSurfaceKHR vkSurfaceKHR) noexcept
+			: vkPhysicalDevice(vkPhysicalDevice), vkSurfaceKHR(vkSurfaceKHR) {
+
+				vkGetPhysicalDeviceFeatures(vkPhysicalDevice, &vkPhysicalDeviceFeatures);
+				vkGetPhysicalDeviceProperties(vkPhysicalDevice, &vkPhysicalDeviceProperties);
+
+				uint32_t vkExtensionPropertiesCount;
+				vkEnumerateDeviceExtensionProperties(vkPhysicalDevice, nullptr, &vkExtensionPropertiesCount, nullptr);
+				vkExtensionProperties.Resize(vkExtensionPropertiesCount);
+				vkEnumerateDeviceExtensionProperties(vkPhysicalDevice, nullptr, &vkExtensionPropertiesCount, vkExtensionProperties.Data());
+
+				uint32_t vkQueueFamilyPropertiesCount;
+				vkGetPhysicalDeviceQueueFamilyProperties(vkPhysicalDevice, &vkQueueFamilyPropertiesCount, nullptr);
+				vkQueueFamilyProperties.Resize(vkQueueFamilyPropertiesCount);
+				vkGetPhysicalDeviceQueueFamilyProperties(vkPhysicalDevice, &vkQueueFamilyPropertiesCount, vkQueueFamilyProperties.Data());
+
+				vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vkPhysicalDevice, vkSurfaceKHR, &vkSurfaceCapabilitiesKHR);
+
+				uint32_t vkSurfaceFormatsCount;
+				vkGetPhysicalDeviceSurfaceFormatsKHR(vkPhysicalDevice, vkSurfaceKHR, &vkSurfaceFormatsCount, nullptr);
+				vkSurfaceFormatsKHR.Resize(vkSurfaceFormatsCount);
+				vkGetPhysicalDeviceSurfaceFormatsKHR(vkPhysicalDevice, vkSurfaceKHR, &vkSurfaceFormatsCount, vkSurfaceFormatsKHR.Data());
+
+				uint32_t vkPresentModesCount;
+				vkGetPhysicalDeviceSurfacePresentModesKHR(vkPhysicalDevice, vkSurfaceKHR, &vkPresentModesCount, nullptr);
+				vkPresentModesKHR.Resize(vkPresentModesCount);
+				vkGetPhysicalDeviceSurfacePresentModesKHR(vkPhysicalDevice, vkSurfaceKHR, &vkPresentModesCount, vkPresentModesKHR.Data());
+
+				uint32_t queueFamilyIndex = 0;
+				for (const VkQueueFamilyProperties& properties : vkQueueFamilyProperties) {
+					bool transferOrGraphicsQueueFound = false;
+					if (!transferQueueFound && properties.queueFlags & VK_QUEUE_TRANSFER_BIT
+						&& (graphicsQueueFound || !(properties.queueFlags & VK_QUEUE_GRAPHICS_BIT))) {
+						transferQueueFamilyIndex = queueFamilyIndex;
+						transferQueueFound = true;
+						transferOrGraphicsQueueFound = true;
+					}
+					if (!transferOrGraphicsQueueFound && !graphicsQueueFound && properties.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+						graphicsQueueFamilyIndex = queueFamilyIndex;
+						graphicsQueueFound = true;
+						transferOrGraphicsQueueFound = true;
+					}
+					if (!transferOrGraphicsQueueFound && !presentQueueFound) {
+						VkBool32 presentSupported{};
+						vkGetPhysicalDeviceSurfaceSupportKHR(vkPhysicalDevice, queueFamilyIndex, vkSurfaceKHR, &presentSupported);
+						if (presentSupported) {
+							presentQueueFamilyIndex = queueFamilyIndex;
+							presentSupported = true;
+						}
+					}
+					if (graphicsQueueFound && transferQueueFound && presentQueueFound) {
+						break;
+					}
+					++queueFamilyIndex;
+				}
+			}
+		};
+	}
+
 	class Backend {
 	public:
+
 		Backend(Simple& engine);
-		const Thread& GetMainThread();
+
+		inline const Thread& GetMainThread() const {
+			return *_mainThread;
+		}
+
+		inline const Thread& GetThread(std::thread::id threadID) {
+			std::lock_guard<std::mutex> lock(_threadsMutex);
+			auto bucket = _threads.GetBucket(Thread::Hash()(threadID));
+			if (!bucket->second) {
+				return _NewThread(threadID);
+			}
+			for (size_t i = 0; i < bucket->second; i++) {
+				if (bucket->first[i].first._ID == threadID) {
+					return bucket->first[i].first;
+				}
+			}
+			return _NewThread(threadID);
+		}
+
 	private:
+
 		Simple& _engine;
 		VkAllocationCallbacks* _vkAllocationCallbacks = VK_NULL_HANDLE;
-		Thread _mainThread{};
+		Set<Thread, Thread::Hash> _threads{};
+		std::mutex _threadsMutex{};
+		Thread* _mainThread;
 		VkInstance _vkInstance{};
-		VkPhysicalDevice _vkPhysicalDevice{}; 
+		VkPhysicalDevice _vkPhysicalDevice{};
+		vulkan::PhysicalDeviceInfo _vulkanPhysicalDeviceInfo;
 		VkSurfaceKHR _vkSurfaceKHR{};
 		VkDevice _vkDevice{};
 		Queue _graphicsQueue{};
@@ -92,19 +207,47 @@ namespace simple {
 		Queue _presentQueue{};
 		ImageSamples _colorMsaaSamples{};
 		ImageSamples _depthMsaaSamples{};
-		simple::Array<VkSemaphore, FRAMES_IN_FLIGHT> _frameReadySemaphores{};
-		simple::Array<VkSemaphore, FRAMES_IN_FLIGHT> _frameFinishedSemaphores{};
-		simple::Array<VkFence, FRAMES_IN_FLIGHT> _inFlightFences{};
-		simple::Array<VkCommandBuffer, FRAMES_IN_FLIGHT> _renderingCommandBuffers{};
+		simple::Array<VkSemaphore, FRAMES_IN_FLIGHT> _frameReadyVkSemaphores{};
+		simple::Array<VkSemaphore, FRAMES_IN_FLIGHT> _frameFinishedVkSemaphores{};
+		simple::Array<VkFence, FRAMES_IN_FLIGHT> _inFlightVkFences{};
+		simple::Array<VkCommandBuffer, FRAMES_IN_FLIGHT> _vkRenderingCommandBuffers{};
 		VkSwapchainKHR _vkSwapchainKHR{};
-		VkExtent2D _vkSwapchainExtent2D{};
+		VkExtent2D _swapchainVkExtent2D{};
 		VkSurfaceFormatKHR _vkSurfaceFormatKHR{};
 		VkPresentModeKHR _vkPresentModeKHR{};
 		simple::Array<VkImage, FRAMES_IN_FLIGHT> _swapchainImages{};
+		simple::Array<VkImageView, FRAMES_IN_FLIGHT> _swapchainImageViews{};
 
-		inline void CreateSwapchain() {
+		inline Thread& _NewThread(std::thread::id threadID) {
 
+			std::lock_guard<std::mutex> lock(_threadsMutex);
+
+			Thread newThread{};
+			newThread._ID = threadID;
+
+			VkCommandPoolCreateInfo graphicsCommandPoolInfo {
+				.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+				.pNext = nullptr,
+				.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+				.queueFamilyIndex = _graphicsQueue.index
+			};
+			assert(Succeeded(vkCreateCommandPool(_vkDevice, &graphicsCommandPoolInfo, _vkAllocationCallbacks, &newThread._vkGraphicsCommandPool)) && "failed to create vulkan graphics command pool for simple::Thread!");
+
+			VkCommandPoolCreateInfo transformCommandPoolInfo{
+				.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+				.pNext = nullptr,
+				.flags = 0,
+				.queueFamilyIndex = _transferQueue.index
+			};
+			assert(Succeeded(vkCreateCommandPool(_vkDevice, &transformCommandPoolInfo, _vkAllocationCallbacks, &newThread._vkTransferCommandPool))&& "failed to create vulkan transfer command pool for simple::Thread");
+
+			auto pair = _threads.Insert(newThread);
+			assert(pair.first && "failed to insert simple::Thread to tracked simple::Backend threads!");
+
+			return *pair.second;
 		}
+
+		void _CreateSwapchain();
 
 		friend class Simple;
 		friend class Image;
@@ -116,12 +259,14 @@ namespace simple {
 	public:
 		constexpr static inline const char* engine_name = "Simple";
 		constexpr static inline const char* app_name = "Simple";
+
 		inline Simple(Window&& window) : _backend(*this), _window(std::move(window)) {}
 		Backend& GetBackend();
-		void Terminate();
+		~Simple();
 	private:
 		Window _window;
 		Backend _backend;
+
 		friend class Backend;
 		friend class Image;
 		friend class ImageView;
@@ -174,7 +319,7 @@ namespace simple {
 		inline Image(Image&& other) noexcept;
 
 		bool IsNull() const noexcept {
-			return _vkImage == VK_NULL_HANDLE || _vkDeviceMemory == VK_NULL_HANDLE;
+			return _vkImage == VK_NULL_HANDLE;
 		}
 
 		inline bool CreateImage(ImageExtent extent, ImageFormat format, ImageUsages usage, 
@@ -226,7 +371,6 @@ namespace simple {
 				.pNext = nullptr,
 				.allocationSize = vkMemRequirements.size,
 			};
-			vkResult = vkAllocateMemory(_engine._backend._vkDevice, &vkAllocInfo, _engine._backend._vkAllocationCallbacks, &_vkDeviceMemory);
 			if (!Succeeded(vkResult)) {
 				logError(this, "failed to allocate memory (function vkAllocateMemory) for simple::Image");
 				vkDestroyImage(_engine._backend._vkDevice, _vkImage, _engine._backend._vkAllocationCallbacks);
