@@ -3,6 +3,7 @@
 #include "simple_allocator.hpp"
 #include "simple_array.hpp"
 #include "simple_dynamic_array.hpp"
+#include "simple_pair.hpp"
 #include "simple_tuple.hpp"
 #include "simple_logging.hpp"
 #include <cstdint>
@@ -11,14 +12,14 @@
 namespace simple {
 
 	template<typename T, typename Hasher, uint8_t MaxBucketSize = 4,
-		typename Allocator = DynamicAllocator<Tuple<Array<Tuple<T, bool>, MaxBucketSize>, uint8_t>>>
+		typename Allocator = DynamicAllocator<Pair<Array<Pair<T, bool>, MaxBucketSize>, uint8_t>>>
 	class Set {
 	public:
 
 		typedef size_t HashType;
 		typedef uint8_t BucketSize;
-		typedef Tuple<T, bool> Element;
-		typedef Tuple<Array<Element, MaxBucketSize>, BucketSize> Bucket;
+		typedef Pair<T, bool> Element;
+		typedef Pair<Array<Element, MaxBucketSize>, BucketSize> Bucket;
 
 		struct Iterator {	
 
