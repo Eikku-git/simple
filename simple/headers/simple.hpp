@@ -4,8 +4,6 @@
 #include "simple_algorithm.hpp"
 #include "simple_dynamic_array.hpp"
 #include "vulkan/vulkan_core.h"
-#include <cinttypes>
-#include <pthread.h>
 #ifdef FRAMES_IN_FLIGHT
 #else
 #define FRAMES_IN_FLIGHT 2U

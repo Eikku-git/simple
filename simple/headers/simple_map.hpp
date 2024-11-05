@@ -10,7 +10,7 @@
 namespace simple {
 
 	template<typename Key, typename Val, typename Hasher, uint8_t MaxBucketSize = 4,
-		typename BucketAllocator = DynamicAllocator<Tuple<Array<Tuple<Key, Val>, MaxBucketSize>, uint8_t>>>
+		typename BucketAllocator = DynamicAllocator<Pair<Array<Pair<Key, Val>, MaxBucketSize>, uint8_t>>>
 	class Map {
 	public:
 
@@ -83,12 +83,12 @@ namespace simple {
 			for (size_t i = 0; i < _capacity; i++) {
 				_allocator.construct(&_buckets[i]);
 			}
-			_elements.clear();
-			_elements.reserve(_capacity);
+			_elements.Clear();
+			_elements.Reserve(_capacity);
 			for (size_t i = 0; i < oldCapacity; i++) {
 				for (size_t j = 0; j < temp[i].second; j++) {
-					KeyValPair* pair = emplace(std::move(temp[i].first[j].first)).second;
-					pair->second = temp[i].first[j].second;
+					KeyValPair* pair = Emplace(std::move(temp[i].first[j].first)).second;
+					new(&pair->second) Val(std::move(temp[i].first[j].second));
 				}
 			}
 			_allocator.deallocate(temp, 1);
@@ -231,7 +231,7 @@ namespace simple {
 
 		~Map() {
 			for (KeyValPair& element : *this) {
-				&element->~KeyValPair();
+				(&element)->~KeyValPair();
 			}
 			_allocator.deallocate(_buckets, 1);
 			_buckets = nullptr;
