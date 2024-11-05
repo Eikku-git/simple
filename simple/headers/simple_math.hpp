@@ -339,7 +339,7 @@ namespace simple {
 		static inline float AngleBetween(const Quaternion& a, const Quaternion& b) noexcept {
 			return acos(fmin(fabs(Quaternion::Dot(a, b)), 1.0f)) * 2.0f;
 		}
-		static inline Quaternion slerp(const Quaternion& from, const Quaternion& to, float t) noexcept {
+		static inline Quaternion Slerp(const Quaternion& from, const Quaternion& to, float t) noexcept {
 			return Quaternion(from * (1 - t) + to * t).Normalized();
 		}
 		static inline Quaternion RotateTowards(const Quaternion& from, const Quaternion& to, float maxRadians) noexcept {
@@ -347,7 +347,7 @@ namespace simple {
 			if (abs(angle) < 0.00001f) {
 				return to;
 			}
-			return slerp(from, to, simple::clamp(maxRadians / angle, 0.0f, 1.0f));
+			return Slerp(from, to, Clamp(maxRadians / angle, 0.0f, 1.0f));
 		}
 		static inline Quaternion AxisRotation(const Vec3& axis, float radians) noexcept {
 			radians /= 2;

@@ -58,6 +58,8 @@ namespace simple {
 			}
 		};
 
+		typedef const Iterator ConstIterator;
+
 		inline Set() : _capacity(128), _buckets(nullptr), _elements(), _trash(0) {
 			_buckets = Allocator().allocate(_capacity);
 			for (size_t i = 0; i < _capacity; i++) {
@@ -97,8 +99,8 @@ namespace simple {
 			for (uint32_t i = 0; i < _capacity; i++) {
 				Allocator().construct(&_buckets[i]);
 			}
-			_elements.clear();
-			_elements.reserve(_capacity);
+			_elements.Clear();
+			_elements.Reserve(_capacity);
 			for (uint32_t i = 0; i < oldCapacity; i++) {
 				for (BucketSize j = 0; j < temp[i].second; j++) {
 					Emplace(std::move(temp[i].first[j].first));
@@ -123,10 +125,10 @@ namespace simple {
 			}
 			bucket.first[bucket.second].first = value;
 			bucket.first[bucket.second].second = true;
-			Element* element = *_elements.PushBack(&bucket.first[bucket.second++]);
-			if ((float)_elements.size() / _capacity >= 0.8f) {
+			if ((float)_elements.Size() / _capacity >= 0.8f) {
 				Reserve(_capacity * 2);
 			}
+			Element* element = _elements.PushBack(&bucket.first[bucket.second++]);
 			return { true, &element->first } ;
 		}
 
@@ -146,10 +148,10 @@ namespace simple {
 					return { false, nullptr };
 				}
 			}
-			new(&bucket.first[bucket.second].first) (std::move(value));
+			new(&bucket.first[bucket.second].first) T(std::move(value));
 			bucket.first[bucket.second].second = true;
 			_elements.PushBack(&bucket.first[bucket.second]);
-			if ((float)_elements.size() / _capacity >= 0.8f) {
+			if ((float)_elements.Size() / _capacity >= 0.8f) {
 				Reserve(_capacity * 2);
 			}
 			return { true, &bucket.first[bucket.second++].first };
@@ -190,7 +192,7 @@ namespace simple {
 		}
 
 		inline const Bucket* GetBucket(HashType hash) {
-			return _buckets[hash % _capacity];
+			return &_buckets[hash % _capacity];
 		}
 
 		inline const T* Find(const T& value) {
@@ -222,13 +224,13 @@ namespace simple {
 			return Iterator(ptr, _elements);
 		}
 
-		inline const Iterator end() {
+		inline ConstIterator end() {
 			return Iterator((Element**)_elements.end(), _elements);
 		}
 
 		~Set() {
 			for (T& value : *this) {
-				&value->~T();
+				(&value)->~T();
 			}
 			Allocator().deallocate(_buckets, 1);
 			_buckets = nullptr;

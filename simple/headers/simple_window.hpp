@@ -10,6 +10,9 @@
 
 namespace simple {
 
+	class Window;
+	typedef GLFWmonitor* Monitor;
+
 	class WindowSystem {
 	public:
 
@@ -20,13 +23,6 @@ namespace simple {
 		static inline void Terminate() {
 			glfwTerminate();
 		};
-	};
-
-	typedef GLFWmonitor* Monitor;
-
-	class Window;
-
-	class Lol {
 	};
 
 	enum class Key {
@@ -199,6 +195,8 @@ namespace simple {
 	class Window {
 	public:
 
+		inline Window() noexcept : _pGlfwWindow(nullptr), _pInput(nullptr) {}
+
 		inline Window(Window&& other) noexcept : _pGlfwWindow(other._pGlfwWindow), _pInput(other._pInput) {
 			other._pGlfwWindow = nullptr;
 			other._pInput = nullptr;
@@ -214,7 +212,8 @@ namespace simple {
 			if (!_pGlfwWindow) {
 				return false;
 			}
-			_pInput->Init(*this);
+			_pInput = new Input();
+			//_pInput->Init(*this);
 			return true;
 		}
 

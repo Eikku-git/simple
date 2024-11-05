@@ -8,7 +8,7 @@ namespace simple {
 	struct Array {
 
 		typedef T* Iterator;
-		typedef T* const ConstIterator;
+		typedef const T* ConstIterator;
 
 		constexpr inline size_t Size() const {
 			return size;
@@ -22,14 +22,13 @@ namespace simple {
 			return _data[index];
 		}
 
-		T& operator[](size_t index) const {
+		constexpr inline T& operator[](size_t index) const {
 			assert(index < size && "attempting to access array index past it's bounds!");
-			return _data[index];
+			return *(T*)(&_data[index]);
 		}
 
-
 		inline Iterator begin() const noexcept {
-			return &_data[0];
+			return (T*)&_data[0];
 		}
 
 		constexpr inline ConstIterator end() const noexcept {

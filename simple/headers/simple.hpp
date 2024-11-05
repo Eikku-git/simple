@@ -299,6 +299,7 @@ namespace simple {
 			std::lock_guard<std::mutex> lock(_queuedGraphicsCommandBuffersMutex);
 			_queuedGraphicsCommandBuffers.PushBack(commandBuffer);
 		}
+
 		void _CreateSwapchain();
 
 		friend class Simple;

@@ -11,7 +11,7 @@ namespace simple {
 	public:
 
 		typedef T* Iterator;
-		typedef T* const ConstIterator;
+		typedef const T* ConstIterator;
 
 		inline DynamicArray() : _allocator(), _capacity(0), _size(0), _pData(nullptr) {}
 

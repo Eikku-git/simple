@@ -38,7 +38,6 @@ namespace simple {
 		};
 	}
 
-#define _DEBUG
 #ifdef _DEBUG
 	constexpr size_t layers_to_enable_count = 1;
 #else
@@ -148,7 +147,6 @@ namespace simple {
 
 		CommandBuffer imageLayoutTransitionCommandBuffer(GetNewGraphicsCommandBuffer(GetThread(std::this_thread::get_id())));
 		imageLayoutTransitionCommandBuffer.Allocate();
-
 		Array<VkImageMemoryBarrier, FRAMES_IN_FLIGHT> imageTransitionMemoryBarriers{};
 		for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
 			imageTransitionMemoryBarriers[i].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -236,7 +234,7 @@ namespace simple {
 			vulkan::PhysicalDeviceInfo deviceInfo(device, _vkSurfaceKHR);
 			bool allRequiredExtensionsFound = true;
 			for (const VkExtensionProperties& properties : deviceInfo.vkExtensionProperties) {
-				if (!Find(properties.extensionName, requiredDeviceExtensions.begin(), requiredInstanceExtensions.end())) {
+				if (!Find(properties.extensionName, requiredDeviceExtensions.begin(), requiredDeviceExtensions.end())) {
 					allRequiredExtensionsFound = false;	
 				}
 			}
