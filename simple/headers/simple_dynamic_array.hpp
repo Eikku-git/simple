@@ -88,13 +88,13 @@ namespace simple {
 			return *this;
 		}
 
-		inline Iterator PushBack(const T& value) {
+		inline T& PushBack(const T& value) {
 			if (_size >= _capacity) {
 				Reserve((_capacity ? _capacity : 1) * 2);
 			}
 			_allocator.construct(&_pData[_size]);
 			_pData[_size++] = value;
-			return Back();
+			return *Back();
 		}
 
 		inline Iterator Insert(Iterator where, const T& value) {
@@ -113,12 +113,12 @@ namespace simple {
 		}
 
 		template<typename... Args>
-		inline Iterator EmplaceBack(Args&&... args) {
+		inline T& EmplaceBack(Args&&... args) {
 			if (_size >= _capacity) {
 				Reserve((_capacity ? _capacity : 1) * 2);
 			}
 			_allocator.construct(&_pData[_size++], std::forward<Args>(args)...);
-			return Back();
+			return *Back();
 		}
 
 		template<typename... Args>
