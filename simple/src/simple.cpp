@@ -145,7 +145,7 @@ namespace simple {
 				&& "failed to create vulkan swapchain image view (function vkCreateImageView in function simple::Backend::_CreateSwapchain)");
 		}
 
-		Thread* thread = GetThread(std::this_thread::get_id());
+		const Thread* thread = GetThisThread();
 		assert(thread && "attempting to start a process on a thread that hasn't been created yet!");
 
 		CommandBuffer imageLayoutTransitionCommandBuffer(GetNewGraphicsCommandBuffer(*thread));
