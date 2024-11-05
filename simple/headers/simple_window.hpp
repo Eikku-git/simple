@@ -208,6 +208,7 @@ namespace simple {
 
 		inline bool Init(uint32_t width, uint32_t height, const char* title, Monitor monitor) {
 			assert(monitor || width && height && "attempting to create a window with invalid arguments");
+			glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 			_pGlfwWindow = glfwCreateWindow(width, height, title, monitor, nullptr);
 			if (!_pGlfwWindow) {
 				return false;
