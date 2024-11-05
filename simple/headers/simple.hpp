@@ -56,8 +56,8 @@ namespace simple {
 			VkPhysicalDeviceProperties vkPhysicalDeviceProperties;
 			DynamicArray<VkExtensionProperties> vkExtensionProperties{};
 			DynamicArray<VkQueueFamilyProperties> vkQueueFamilyProperties{};
-			uint32_t graphicsQueueFamilyIndex, transferQueueFamilyIndex, presentQueueFamilyIndex{};
-			bool graphicsQueueFound, transferQueueFound, presentQueueFound{};
+			uint32_t graphicsQueueFamilyIndex{}, transferQueueFamilyIndex{}, presentQueueFamilyIndex{};
+			bool graphicsQueueFound{}, transferQueueFound{}, presentQueueFound{};
 			VkSurfaceCapabilitiesKHR vkSurfaceCapabilitiesKHR;
 			DynamicArray<VkSurfaceFormatKHR> vkSurfaceFormatsKHR{};
 			DynamicArray<VkPresentModeKHR> vkPresentModesKHR{};
@@ -111,7 +111,7 @@ namespace simple {
 						vkGetPhysicalDeviceSurfaceSupportKHR(vkPhysicalDevice, queueFamilyIndex, vkSurfaceKHR, &presentSupported);
 						if (presentSupported) {
 							presentQueueFamilyIndex = queueFamilyIndex;
-							presentSupported = true;
+							presentQueueFound = true;
 						}
 					}
 					if (graphicsQueueFound && transferQueueFound && presentQueueFound) {
@@ -320,6 +320,8 @@ namespace simple {
 
 		inline void _Terminate() {
 			std::lock_guard<std::mutex> lock(_threadsMutex);
+			vkDestroyCommandPool(_vkDevice, _mainThread._vkGraphicsCommandPool, _vkAllocationCallbacks);
+			vkDestroyCommandPool(_vkDevice, _mainThread._vkTransferCommandPool, _vkAllocationCallbacks);
 			for (Thread& thread : _threads) {
 				thread._stdThread.join();
 				vkDestroyCommandPool(_vkDevice, thread._vkGraphicsCommandPool, _vkAllocationCallbacks);

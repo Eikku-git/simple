@@ -48,7 +48,7 @@ namespace simple {
 		"VK_LAYER_KHRONOS_validation",
 	};
 
-	const Array<String<>, 1> requiredDeviceExtensions {
+	const Array<const char*, 1> requiredDeviceExtensions {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 	};
 
@@ -81,9 +81,9 @@ namespace simple {
 			_swapchainVkExtent2D = actualExtent;
 		}
 
-		assert(FRAMES_IN_FLIGHT < _vulkanPhysicalDeviceInfo.vkSurfaceCapabilitiesKHR.maxImageCount
+		assert(FRAMES_IN_FLIGHT <= _vulkanPhysicalDeviceInfo.vkSurfaceCapabilitiesKHR.maxImageCount
 			&& "FRAMES_IN_FLIGHT exceeds the maximum supported maximum image count given by vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
-		assert(FRAMES_IN_FLIGHT > _vulkanPhysicalDeviceInfo.vkSurfaceCapabilitiesKHR.minImageCount
+		assert(FRAMES_IN_FLIGHT >= _vulkanPhysicalDeviceInfo.vkSurfaceCapabilitiesKHR.minImageCount
 			&& "FRAMES_IN_FLIGHT are less than the minimum supported image count given by vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
 
 		uint32_t queueFamilies[2] {
@@ -150,18 +150,18 @@ namespace simple {
 
 		CommandBuffer imageLayoutTransitionCommandBuffer(GetNewGraphicsCommandBuffer(*thread));
 		imageLayoutTransitionCommandBuffer.Allocate();
-		Array<VkImageMemoryBarrier, FRAMES_IN_FLIGHT> imageTransitionMemoryBarriers{};
+		Array<VkImageMemoryBarrier, FRAMES_IN_FLIGHT> imageLayoutTransitionMemoryBarriers{};
 		for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
-			imageTransitionMemoryBarriers[i].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-			imageTransitionMemoryBarriers[i].pNext = nullptr;
-			imageTransitionMemoryBarriers[i].srcAccessMask = 0;
-			imageTransitionMemoryBarriers[i].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-			imageTransitionMemoryBarriers[i].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-			imageTransitionMemoryBarriers[i].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-			imageTransitionMemoryBarriers[i].srcQueueFamilyIndex = _graphicsQueue.index;
-			imageTransitionMemoryBarriers[i].dstQueueFamilyIndex = _graphicsQueue.index;
-			imageTransitionMemoryBarriers[i].image = _swapchainImages[i];
-			imageTransitionMemoryBarriers[i].subresourceRange = {
+			imageLayoutTransitionMemoryBarriers[i].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+			imageLayoutTransitionMemoryBarriers[i].pNext = nullptr;
+			imageLayoutTransitionMemoryBarriers[i].srcAccessMask = 0;
+			imageLayoutTransitionMemoryBarriers[i].dstAccessMask = 0;
+			imageLayoutTransitionMemoryBarriers[i].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			imageLayoutTransitionMemoryBarriers[i].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			imageLayoutTransitionMemoryBarriers[i].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			imageLayoutTransitionMemoryBarriers[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			imageLayoutTransitionMemoryBarriers[i].image = _swapchainImages[i];
+			imageLayoutTransitionMemoryBarriers[i].subresourceRange = {
 				.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 				.baseMipLevel = 0,
 				.levelCount = 1,
@@ -170,7 +170,7 @@ namespace simple {
 			};
 		}
 		vkCmdPipelineBarrier(imageLayoutTransitionCommandBuffer.Begin(), image_transition_src_stage_mask, image_transition_dst_stage_mask, 
-		0, 0, nullptr, 0, nullptr, FRAMES_IN_FLIGHT, imageTransitionMemoryBarriers.Data());
+		0, 0, nullptr, 0, nullptr, FRAMES_IN_FLIGHT, imageLayoutTransitionMemoryBarriers.Data());
 		imageLayoutTransitionCommandBuffer.End();
 		imageLayoutTransitionCommandBuffer.Submit();
 	}
@@ -245,7 +245,7 @@ namespace simple {
 			}
 			int score = 10;
 			if (!deviceInfo.vkPhysicalDeviceFeatures.samplerAnisotropy || 
-				!deviceInfo.graphicsQueueFamilyIndex || !deviceInfo.transferQueueFound || !deviceInfo.presentQueueFound ||
+				!deviceInfo.graphicsQueueFound || !deviceInfo.transferQueueFound || !deviceInfo.presentQueueFound ||
 				!allRequiredExtensionsFound || !deviceInfo.vkSurfaceFormatsKHR.Size() || !deviceInfo.vkPresentModesKHR.Size()
 				|| !deviceInfo.vkPhysicalDeviceFeatures.fillModeNonSolid) {
 				score = -1;
@@ -297,7 +297,7 @@ namespace simple {
 			.queueCreateInfoCount = vkDeviceQueueCreateInfos.Size(),
 			.pQueueCreateInfos = vkDeviceQueueCreateInfos.Data(),
 			.enabledExtensionCount = requiredDeviceExtensions.Size(),
-			.ppEnabledExtensionNames = requiredInstanceExtensions.Data(),
+			.ppEnabledExtensionNames = requiredDeviceExtensions.Data(),
 			.pEnabledFeatures = &vkPhysicalDeviceFeatures,
 		};
 
@@ -307,9 +307,9 @@ namespace simple {
 		vkGetDeviceQueue(_vkDevice, queueFamilyIndices[0], 0, &_graphicsQueue.vkQueue);
 		_graphicsQueue.index = queueFamilyIndices[0];
 		vkGetDeviceQueue(_vkDevice, queueFamilyIndices[1], 0, &_transferQueue.vkQueue);
-		_transferQueue.index = queueFamilyIndices[3];
+		_transferQueue.index = queueFamilyIndices[1];
 		vkGetDeviceQueue(_vkDevice, queueFamilyIndices[2], 0, &_presentQueue.vkQueue);
-		_presentQueue.index = queueFamilyIndices[3];
+		_presentQueue.index = queueFamilyIndices[2];
 
 		VkCommandPoolCreateInfo mainGraphicsVkCommandPoolInfo {
 			.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
