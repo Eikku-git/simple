@@ -45,12 +45,13 @@ namespace simple {
 		return vkResult == VK_SUCCESS;
 	}
 
+	class Backend;
+
 	class Thread {
 	public:
 
 		std::thread::id GetID() const {
 			return _ID;
-			vkResult = vkAllocateMemory(_engine._backend._vkDevice, &vkAllocInfo, _engine._backend._vkAllocationCallbacks, &_vkDeviceMemory);
 		}
 
 		VkCommandPool GetGraphicsCommandPool() const {
@@ -167,8 +168,49 @@ namespace simple {
 		};
 	}
 
+	enum class ThreadCommandPool {
+		None = 0,
+		Graphics = 1,
+		Transfer = 2,
+	};
+
+	class CommandBuffer {
+	public:
+
+		inline CommandBuffer(Backend& backend, ThreadCommandPool threadCommandPool, VkCommandPool vkCommandPool) noexcept 
+		: _backend(backend), _threadCommandPool(threadCommandPool), _vkCommandPool(vkCommandPool), _vkCommandBuffer(VK_NULL_HANDLE) {}
+
+		void Allocate();
+		inline VkCommandBuffer Begin() {
+			assert(_vkCommandBuffer != VK_NULL_HANDLE
+				&& "attempting to begin a simple::CommandBuffer (function simple::CommandBuffer::Begin) when it hasn't been allocated yet");
+			VkCommandBufferBeginInfo beginInfo {
+				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+				.pNext = nullptr,
+				.flags = 0,
+				.pInheritanceInfo = nullptr
+			};
+			assert(Succeeded(vkBeginCommandBuffer(_vkCommandBuffer, &beginInfo))
+				&& "failed to begin simple::CommandBuffer (function simple::CommandBuffer::Begin)");
+			return _vkCommandBuffer;
+		}
+		inline void End() {
+			vkEndCommandBuffer(_vkCommandBuffer);
+		}
+		void Submit();
+
+	private:
+		Backend& _backend;
+		ThreadCommandPool _threadCommandPool;
+		VkCommandPool _vkCommandPool;
+		VkCommandBuffer _vkCommandBuffer;
+	};
+
 	class Backend {
 	public:
+
+		static constexpr inline VkPipelineStageFlags image_transition_src_stage_mask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		static constexpr inline VkPipelineStageFlags image_transition_dst_stage_mask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 
 		Backend(Simple& engine);
 
@@ -190,6 +232,10 @@ namespace simple {
 			return _NewThread(threadID);
 		}
 
+		inline CommandBuffer GetNewGraphicsCommandBuffer(const Thread& thread) {
+			return CommandBuffer(*this, ThreadCommandPool::Graphics, thread._vkGraphicsCommandPool);
+		}
+
 	private:
 
 		Simple& _engine;
@@ -197,6 +243,8 @@ namespace simple {
 		Set<Thread, Thread::Hash> _threads{};
 		std::mutex _threadsMutex{};
 		Thread* _mainThread;
+		DynamicArray<VkCommandBuffer> _queuedGraphicsCommandBuffers{};
+		std::mutex _queuedGraphicsCommandBuffersMutex{};
 		VkInstance _vkInstance{};
 		VkPhysicalDevice _vkPhysicalDevice{};
 		vulkan::PhysicalDeviceInfo _vulkanPhysicalDeviceInfo;
@@ -207,16 +255,16 @@ namespace simple {
 		Queue _presentQueue{};
 		ImageSamples _colorMsaaSamples{};
 		ImageSamples _depthMsaaSamples{};
-		simple::Array<VkSemaphore, FRAMES_IN_FLIGHT> _frameReadyVkSemaphores{};
-		simple::Array<VkSemaphore, FRAMES_IN_FLIGHT> _frameFinishedVkSemaphores{};
-		simple::Array<VkFence, FRAMES_IN_FLIGHT> _inFlightVkFences{};
-		simple::Array<VkCommandBuffer, FRAMES_IN_FLIGHT> _vkRenderingCommandBuffers{};
+		Array<VkSemaphore, FRAMES_IN_FLIGHT> _frameReadyVkSemaphores{};
+		Array<VkSemaphore, FRAMES_IN_FLIGHT> _frameFinishedVkSemaphores{};
+		Array<VkFence, FRAMES_IN_FLIGHT> _inFlightVkFences{};
+		Array<VkCommandBuffer, FRAMES_IN_FLIGHT> _vkRenderingCommandBuffers{};
 		VkSwapchainKHR _vkSwapchainKHR{};
 		VkExtent2D _swapchainVkExtent2D{};
 		VkSurfaceFormatKHR _vkSurfaceFormatKHR{};
 		VkPresentModeKHR _vkPresentModeKHR{};
-		simple::Array<VkImage, FRAMES_IN_FLIGHT> _swapchainImages{};
-		simple::Array<VkImageView, FRAMES_IN_FLIGHT> _swapchainImageViews{};
+		Array<VkImage, FRAMES_IN_FLIGHT> _swapchainImages{};
+		Array<VkImageView, FRAMES_IN_FLIGHT> _swapchainImageViews{};
 
 		inline Thread& _NewThread(std::thread::id threadID) {
 
@@ -247,11 +295,16 @@ namespace simple {
 			return *pair.second;
 		}
 
+		inline void _QueueGraphicsCommandBuffer(VkCommandBuffer commandBuffer) {
+			std::lock_guard<std::mutex> lock(_queuedGraphicsCommandBuffersMutex);
+			_queuedGraphicsCommandBuffers.PushBack(commandBuffer);
+		}
 		void _CreateSwapchain();
 
 		friend class Simple;
 		friend class Image;
 		friend class ImageView;
+		friend class CommandBuffer;
 	};
 
 
