@@ -3,20 +3,19 @@
 #include "simple_allocator.hpp"
 #include "simple_array.hpp"
 #include "simple_dynamic_array.hpp"
-#include "tuple.hpp"
-#include "engine_logger.hpp"
+#include "simple_tuple.hpp"
+#include "simple_pair.hpp"
+#include "simple_logging.hpp"
 
 namespace simple {
 
 	template<typename Key, typename Val, typename Hasher, uint8_t MaxBucketSize = 4,
-		typename KeyValAllocator = DynamicAllocator<Tuple<Key, Val>>, 
-		typename BucketAllocator = DynamicAllocator<Tuple<Array<Tuple<Key, Val>, MaxBucketSize>, uint8_t>>,
-		typename KeyAllocator = DynamicAllocator<Key>>
+		typename BucketAllocator = DynamicAllocator<Tuple<Array<Tuple<Key, Val>, MaxBucketSize>, uint8_t>>>
 	class Map {
 	public:
 
-		typedef Tuple<Key, Val> KeyValPair;
-		typedef Tuple<Array<KeyValPair, MaxBucketSize>, uint8_t> Bucket;
+		typedef Pair<Key, Val> KeyValPair;
+		typedef Pair<Array<KeyValPair, MaxBucketSize>, uint8_t> Bucket;
 
 		struct Iterator {
 
@@ -52,40 +51,50 @@ namespace simple {
 		}
 
 		inline Map(Map&& other) noexcept 
-			: _capacity(other._capacity), _buckets(other._buckets), _elements(std::move(other._elements)) {
+			: _allocator(), _capacity(other._capacity), _buckets(other._buckets), _elements(std::move(other._elements)) {
 			other._capacity = 0;
 			other._buckets = nullptr;
 		}
 
-		inline Map(const Map& other) noexcept : _capacity(other._capacity), _buckets(nullptr), _elements() {
-			_buckets = getBucketAllocator().allocate(_capacity);
+		inline Map(const Map& other) noexcept : _allocator(), _capacity(other._capacity), _buckets(nullptr), _elements() {
+			_buckets = _allocator.allocate(_capacity);
 			_elements.reserve(_capacity);
 			for (size_t i = 0; i < _capacity; i++) {
-				getBucketAllocator().construct(&_buckets[i]);
+				_allocator.construct(&_buckets[i]);
 				for (size_t j = 0; j < other._buckets[i].second; j++) {
-					getKeyValAllocator().construct(&_buckets[i].first[j], other._buckets[i].first[j]);
+					new(&_buckets[i].first[j]) KeyValPair(other._buckets[i].first[j]);
 					_buckets[i].second++;
 					_elements.pushBack(&_buckets[i].first[j]);
 				};
 			}
 		}
 
-		constexpr inline KeyValAllocator getKeyValAllocator() noexcept {
-			return KeyValAllocator();
-		}
-
-		constexpr inline BucketAllocator getBucketAllocator() noexcept {
-			return BucketAllocator();
-		}
-
-		constexpr inline KeyAllocator getKeyAllocator() noexcept {
-			return KeyAllocator();
-		}
-
-		inline Tuple<bool, KeyValPair*> insert(const KeyValPair& pair) {
-			if (!_capacity || (float)size() / _capacity >= 0.8f) {
-				reserve(_capacity ? _capacity * 2 : 128);
+		inline void Reserve(uint32_t capacity) {
+			if (capacity <= _capacity) {
+				return;
 			}
+			uint32_t oldCapacity = _capacity;
+			_capacity = _capacity ? _capacity : 1;
+			while (capacity > _capacity) {
+				_capacity *= 2;
+			}
+			Bucket* temp = _buckets;
+			_buckets = _allocator.allocate(_capacity);
+			for (size_t i = 0; i < _capacity; i++) {
+				_allocator.construct(&_buckets[i]);
+			}
+			_elements.clear();
+			_elements.reserve(_capacity);
+			for (size_t i = 0; i < oldCapacity; i++) {
+				for (size_t j = 0; j < temp[i].second; j++) {
+					KeyValPair* pair = emplace(std::move(temp[i].first[j].first)).second;
+					pair->second = temp[i].first[j].second;
+				}
+			}
+			_allocator.deallocate(temp, 1);
+		}
+
+		inline Tuple<bool, KeyValPair*> Insert(const KeyValPair& pair) {
 			uint64_t hash = Hasher()(pair.first);
 			auto& bucket = _buckets[hash % _capacity];
 			if (bucket.second) {
@@ -94,12 +103,15 @@ namespace simple {
 						return { false, &element };
 					}
 				}
-				simple_engine::logMessage("bad hash!");
+				logWarning(this, "bad hash (function simple::Map::Insert)!");
 				if (bucket.second >= MaxBucketSize - 1) {
 					return { false, nullptr };
 				}
 			}
-			getKeyValAllocator().construct(&bucket.first[bucket.second]);
+			if (!_capacity || (float)Size() / _capacity >= 0.8f) {
+				Reserve(_capacity ? _capacity * 2 : 128);
+			}
+			new(&bucket.first[bucket.second]) KeyValPair();
 			bucket.first[bucket.second].first = pair.first;
 			bucket.first[bucket.second].second = pair.second;
 			_elements.pushBack(&bucket.first[bucket.second]);
@@ -107,10 +119,7 @@ namespace simple {
 		}
 
 		template<typename... Args>
-		inline Tuple<bool, KeyValPair*> emplace(Args&&... args) {
-			if (!_capacity || (float)size() / _capacity >= 0.8f) {
-				reserve(_capacity ? _capacity * 2 : 128);
-			}
+		inline Tuple<bool, KeyValPair*> Emplace(Args&&... args) {
 			Key key(std::forward<Args>(args)...);
 			uint64_t hash = Hasher()(key);
 			auto& bucket = _buckets[hash % _capacity];
@@ -120,18 +129,21 @@ namespace simple {
 						return { false, nullptr };
 					}
 				}
-				simple_engine::logMessage("bad hash!");
+				logWarning(this, "bad hash (function simple::Map::Emplace)!");
 				if (bucket.second >= 3) {
 					return { false, nullptr };
 				}
 			}
-			getKeyValAllocator().construct(&bucket.first[bucket.second]);
-			getKeyAllocator().construct(&bucket.first[bucket.second].first, std::move(key));
-			_elements.pushBack(&bucket.first[bucket.second]);
+			if (!_capacity || (float)Size() / _capacity >= 0.8f) {
+				Reserve(_capacity ? _capacity * 2 : 128);
+			}
+			new(&bucket.first[bucket.second]) KeyValPair();
+			new(&bucket.first[bucket.second].first) Key(std::move(key));
+			_elements.PushBack(&bucket.first[bucket.second]);
 			return { true, &bucket.first[bucket.second++] };
 		}
 
-		inline bool contains(const Key& key) const noexcept {
+		inline bool Contains(const Key& key) const noexcept {
 			if (!_buckets) {
 				return false;
 			}
@@ -148,7 +160,7 @@ namespace simple {
 			return false;
 		}
 
-		inline KeyValPair* find(const Key& key) const noexcept {
+		inline KeyValPair* Find(const Key& key) const noexcept {
 			if (!_buckets) {
 				return nullptr;
 			}
@@ -165,33 +177,48 @@ namespace simple {
 			return nullptr;
 		}
 
-		constexpr size_t size() noexcept {
-			return _elements.size();
+		constexpr inline size_t Size() const noexcept {
+			return _elements.Size();
 		}
 
-		void reserve(uint32_t capacity) {
-			if (capacity <= _capacity) {
-				return;
+		inline Val* operator[](const Key& key) {
+			if (!_buckets) {
+				Reserve(128);
 			}
-			uint32_t oldCapacity = _capacity;
-			_capacity = _capacity ? _capacity : 1;
-			while (capacity > _capacity) {
-				_capacity *= 2;
-			}
-			Bucket* temp = _buckets;
-			_buckets = getBucketAllocator().allocate(_capacity);
-			for (size_t i = 0; i < _capacity; i++) {
-				getBucketAllocator().construct(&_buckets[i]);
-			}
-			_elements.clear();
-			_elements.reserve(_capacity);
-			for (size_t i = 0; i < oldCapacity; i++) {
-				for (size_t j = 0; j < temp[i].second; j++) {
-					KeyValPair* pair = emplace(std::move(temp[i].first[j].first)).second;
-					pair->second = temp[i].first[j].second;
+			uint64_t hash = Hasher()(key);
+			auto& bucket = _buckets[hash % _capacity];
+			if (bucket.second) {
+				for (KeyValPair& element : bucket.first) {
+					if (element.first == key) {
+						return &element.second;
+					}
+				}
+				logWarning(this, "bad hash (simple::Map::operator[])!");
+				if (bucket.second >= MaxBucketSize - 1) {
+					return nullptr;
 				}
 			}
-			getBucketAllocator().deallocate(temp, 1);
+			if ((float)Size() / _capacity > 0.8f) {
+				Reserve(_capacity * 2);
+			}
+			new(&bucket.first[bucket.second]) KeyValPair();
+			bucket.first[bucket.second].first = key;
+			_elements.PushBack(&bucket.first[bucket.second]);
+			return &bucket.first[bucket.second++].second;
+		}
+
+		inline Map& operator=(const Map& other) {
+			_capacity = other._capacity;
+			_buckets = _allocator.allocate(_capacity);
+			_elements.reserve(_capacity);
+			for (size_t i = 0; i < _capacity; i++) {
+				_allocator.construct(&_buckets[i]);
+				for (size_t j = 0; j < other._buckets[i].second; j++) {
+					new(&_buckets[i].first[j]) KeyValPair(other._buckets[i].first[j]);
+					_elements.pushBack(&_buckets[i].first[j]);
+				};
+			}
+			return *this;
 		}
 
 		inline Iterator begin() {
@@ -202,55 +229,16 @@ namespace simple {
 			return (KeyValPair**)_elements.end();
 		}
 
-		Val* operator[](const Key& key) {
-			if (!_buckets) {
-				reserve(128);
-			}
-			uint64_t hash = Hasher()(key);
-			auto& bucket = _buckets[hash % _capacity];
-			if (bucket.second) {
-				for (KeyValPair& element : bucket.first) {
-					if (element.first == key) {
-						return &element.second;
-					}
-				}
-				simple_engine::logMessage("bad hash!");
-				if (bucket.second >= MaxBucketSize - 1) {
-					return nullptr;
-				}
-			}
-			if ((float)size() / _capacity > 0.8f) {
-				reserve(_capacity * 2);
-			}
-			getKeyValAllocator().construct(&bucket.first[bucket.second]);
-			bucket.first[bucket.second].first = key;
-			_elements.pushBack(&bucket.first[bucket.second]);
-			return &bucket.first[bucket.second++].second;
-		}
-
-		Map& operator=(const Map& other) {
-			_capacity = other._capacity;
-			_buckets = getBucketAllocator().allocate(_capacity);
-			_elements.reserve(_capacity);
-			for (size_t i = 0; i < _capacity; i++) {
-				getBucketAllocator().construct(&_buckets[i]);
-				for (size_t j = 0; j < other._buckets[i].second; j++) {
-					getKeyValAllocator().construct(&_buckets[i].first[j], other._buckets[i].first[j]);
-					_elements.pushBack(&_buckets[i].first[j]);
-				};
-			}
-			return *this;
-		}
-
 		~Map() {
 			for (KeyValPair& element : *this) {
-				getKeyValAllocator().destroy(&element);
+				&element->~KeyValPair();
 			}
-			getBucketAllocator().deallocate(_buckets, 1);
+			_allocator.deallocate(_buckets, 1);
 			_buckets = nullptr;
 		}
 
 	private:
+		BucketAllocator _allocator;
 		uint32_t _capacity;
 		Bucket* _buckets;
 		simple::DynamicArray<KeyValPair*> _elements;
