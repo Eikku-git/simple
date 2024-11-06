@@ -11,15 +11,15 @@
 
 namespace simple {
 
-	template<typename T, typename Hasher, uint8_t MaxBucketSize = 4,
-		typename Allocator = DynamicAllocator<Pair<Array<Pair<T, bool>, MaxBucketSize>, uint8_t>>>
+	template<typename T, typename Hasher, uint8_t T_max_bucket_size = 4,
+		typename Allocator = DynamicAllocator<Pair<Array<Pair<T, bool>, T_max_bucket_size>, uint8_t>>>
 	class Set {
 	public:
 
 		typedef size_t HashType;
 		typedef uint8_t BucketSize;
 		typedef Pair<T, bool> Element;
-		typedef Pair<Array<Element, MaxBucketSize>, BucketSize> Bucket;
+		typedef Pair<Array<Element, T_max_bucket_size>, BucketSize> Bucket;
 
 		struct Iterator {	
 
@@ -120,7 +120,7 @@ namespace simple {
 					}
 				}
 				simple::logMessage(this, "bad hash (function simple::Set::Insert)!");
-				if (bucket.second >= MaxBucketSize - 1) {
+				if (bucket.second >= T_max_bucket_size - 1) {
 					return { false, nullptr };
 				}
 			}
@@ -145,7 +145,7 @@ namespace simple {
 					}
 				}
 				simple::logMessage(this, "bad hash (function simple::Set::Emplace)!");
-				if (bucket.second >= MaxBucketSize - 1) {
+				if (bucket.second >= T_max_bucket_size - 1) {
 					return { false, nullptr };
 				}
 			}

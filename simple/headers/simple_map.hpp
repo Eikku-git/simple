@@ -9,13 +9,13 @@
 
 namespace simple {
 
-	template<typename Key, typename Val, typename Hasher, uint8_t MaxBucketSize = 4,
-		typename BucketAllocator = DynamicAllocator<Pair<Array<Pair<Key, Val>, MaxBucketSize>, uint8_t>>>
+	template<typename Key, typename Val, typename Hasher, uint8_t T_max_bucket_size = 4,
+		typename BucketAllocator = DynamicAllocator<Pair<Array<Pair<Key, Val>, T_max_bucket_size>, uint8_t>>>
 	class Map {
 	public:
 
 		typedef Pair<Key, Val> KeyValPair;
-		typedef Pair<Array<KeyValPair, MaxBucketSize>, uint8_t> Bucket;
+		typedef Pair<Array<KeyValPair, T_max_bucket_size>, uint8_t> Bucket;
 
 		struct Iterator {
 
@@ -104,7 +104,7 @@ namespace simple {
 					}
 				}
 				logWarning(this, "bad hash (function simple::Map::Insert)!");
-				if (bucket.second >= MaxBucketSize - 1) {
+				if (bucket.second >= T_max_bucket_size - 1) {
 					return { false, nullptr };
 				}
 			}
@@ -194,7 +194,7 @@ namespace simple {
 					}
 				}
 				logWarning(this, "bad hash (simple::Map::operator[])!");
-				if (bucket.second >= MaxBucketSize - 1) {
+				if (bucket.second >= T_max_bucket_size - 1) {
 					return nullptr;
 				}
 			}
