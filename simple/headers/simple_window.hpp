@@ -1,7 +1,7 @@
 #pragma once
 
+#define GLFW_INCLUDE_VULKAN
 #include "GLFW/glfw3.h"
-#include "simple_allocator.hpp"
 #include "simple_array.hpp"
 #include "simple_dynamic_array.hpp"
 #include "simple_math.hpp"
@@ -10,20 +10,9 @@
 
 namespace simple {
 
+	class Simple;
 	class Window;
 	typedef GLFWmonitor* Monitor;
-
-	class WindowSystem {
-	public:
-
-		static inline void Init() {
-			glfwInit();
-		};
-
-		static inline void Terminate() {
-			glfwTerminate();
-		};
-	};
 
 	enum class Key {
 		Space = 32,
@@ -163,6 +152,36 @@ namespace simple {
 		MaxEnum = Eight,
 	};
 
+	class WindowSystem {
+	public:
+
+		static inline void Init() {
+			glfwInit();
+		};
+
+		static inline void PollEvents() {
+			glfwPollEvents();
+		}
+
+		static inline void Terminate() {
+			glfwTerminate();
+		};
+
+		static inline const Window& FindWindow(GLFWwindow* pGlfwWindow) {
+			return **_GetppWindow(pGlfwWindow);
+		}
+
+	private:
+
+		static inline simple::DynamicArray<Window*> _activeWindows{};
+			
+		static void _AddpWindow(Window* pWindow);
+		static bool _RemoveWindow(GLFWwindow* pGlfwWindow);
+		static Window** _GetppWindow(GLFWwindow* pGlfwWindow);
+
+		friend class Window;
+	};
+
 	class Input {
 	public:
 
@@ -195,14 +214,18 @@ namespace simple {
 	class Window {
 	public:
 
-		inline Window() noexcept : _pGlfwWindow(nullptr), _pInput(nullptr) {}
+		inline Window(Simple& engine) noexcept : _engine(engine), _pGlfwWindow(nullptr), _pInput(nullptr) {}
 
-		inline Window(Window&& other) noexcept : _pGlfwWindow(other._pGlfwWindow), _pInput(other._pInput) {
+		inline Window(Window&& other) noexcept : _engine(other._engine), _pGlfwWindow(other._pGlfwWindow), _pInput(other._pInput) {
+			if (other._pGlfwWindow) {
+				Window** ppWindow = WindowSystem::_GetppWindow(_pGlfwWindow);
+				*ppWindow = this;
+			}
 			other._pGlfwWindow = nullptr;
 			other._pInput = nullptr;
 		}
 
-		inline bool IsNull() const noexcept{
+		constexpr inline bool IsNull() const noexcept {
 			return !_pGlfwWindow;
 		}
 
@@ -215,21 +238,29 @@ namespace simple {
 			}
 			_pInput = new Input();
 			//_pInput->Init(*this);
+			WindowSystem::_AddpWindow(this);
 			return true;
 		}
 
-		inline void Terminate() {
-			glfwDestroyWindow(_pGlfwWindow);
+		GLFWwindow* GetRawPointer() const {
+			return _pGlfwWindow;
 		}
 
-		GLFWwindow* GetRawPointer() {
-			return _pGlfwWindow;
+		~Window() {
+			if (_pGlfwWindow) {
+				assert(WindowSystem::_RemoveWindow(_pGlfwWindow) && "bug in code");
+				glfwDestroyWindow(_pGlfwWindow);
+			}
+			delete _pInput;
 		}
 
 	private:
 
+		Simple& _engine;
 		GLFWwindow* _pGlfwWindow = nullptr;
 		Input* _pInput = nullptr;
+
+		friend class WindowSystem;
 	};
 }
 
