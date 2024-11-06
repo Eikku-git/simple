@@ -166,8 +166,8 @@ namespace simple {
 		}
 
 		inline Iterator Find(const T& value) {
-			Iterator begin = _pData[0];
-			for (; begin != _pData[_size];) {
+			Iterator begin = &_pData[0];
+			for (; begin != &_pData[_size];) {
 				if (*begin == value) {
 					break;
 				}
