@@ -1,9 +1,5 @@
+#define EDITOR
 #include "simple.hpp"
-
-static void asyncProcess() {
-	for (size_t i = 0; i < 1000000000; i++) {
-	}
-}
 
 int main() {
 	simple::WindowSystem::Init();
@@ -11,8 +7,13 @@ int main() {
 	window.Init(540, 540, "Test", nullptr);
 	simple::Simple engine(std::move(window));
 	simple::Backend& backend = engine.GetBackend();
-	std::thread thread(asyncProcess);
-	backend.NewThread(std::move(thread));
+	while (!engine.Quitting()) {
+		if (!engine.EditorUpdate()) {
+			break;
+		}
+		engine.LogicUpdate();
+		engine.Render();
+	}
 	simple::WindowSystem::Terminate();
 	return 0;
 }
