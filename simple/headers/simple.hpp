@@ -553,7 +553,19 @@ namespace simple {
 		constexpr static inline const char* engine_name = "Simple";
 		constexpr static inline const char* app_name = "Simple";
 
-		inline Simple(Window&& window) : _backend(*this), _window(std::move(window)) {}
+		inline Simple(Window&& window) : _backend(*this), _window(std::move(window)) {
+			_window._pEngine = this;
+			glfwSetWindowSizeCallback(_window._pGlfwWindow,
+				[](GLFWwindow* pGlfwWindow, int width, int height) {
+					Backend& backend = WindowSystem::FindWindow(pGlfwWindow)._pEngine->_backend;
+					if (width == 0 || height == 0) {
+						backend._swapchainVkExtent2D = { 0, 0 };
+						return;
+					}
+					backend._RecreateSwapchain();
+				}
+			);
+		}
 
 		inline Backend& GetBackend() {
 			return _backend;
