@@ -3,6 +3,7 @@
 #include "simple.hpp"
 #include "simple_algorithm.hpp"
 #include "simple_dynamic_array.hpp"
+#include "vulkan/vulkan_core.h"
 #ifdef FRAMES_IN_FLIGHT
 #else
 #define FRAMES_IN_FLIGHT 2U
@@ -218,32 +219,45 @@ namespace simple {
 		VkCommandBuffer _vkCommandBuffer;
 	};
 
-	typedef VkRenderingAttachmentInfo RenderingAttachment;
 	typedef VkRect2D RenderArea;
+
+	struct RenderingAttachment {
+	public:
+		const VkRenderingAttachmentInfo& GetInfo() {
+			return vkRenderingAttachmentInfo; 
+		}
+		simple::Array<VkImageView, FRAMES_IN_FLIGHT> vkImageViews;
+	private:
+		VkRenderingAttachmentInfo vkRenderingAttachmentInfo {
+			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO
+		};
+	};
 
 	class RenderingContext {
 	public:
 
 		struct Mesh {
 
-			Mesh** _reference;
+			Mesh** reference;
 			uint64_t UID;
 			uint32_t vertexVkBufferCount;
 			VkBuffer* vertexVkBuffers;
+			VkDeviceSize* vertexBufferOffsets;
 			VkBuffer indexVkBuffer;
 
-			inline Mesh(Mesh** reference, uint64_t UID, uint32_t vertexVkBufferCount, VkBuffer* vertexVkBuffers, VkBuffer indexVkBuffer) noexcept
-				: _reference(reference), UID(UID), vertexVkBufferCount(), vertexVkBuffers(vertexVkBuffers), indexVkBuffer(indexVkBuffer) {}
+			inline Mesh(Mesh** reference, uint64_t UID, uint32_t vertexVkBufferCount, VkBuffer* vertexVkBuffers, VkDeviceSize* vertexBufferOffsets, VkBuffer indexVkBuffer) noexcept
+				: reference(reference), UID(UID), vertexVkBufferCount(vertexVkBufferCount), vertexVkBuffers(vertexVkBuffers), 
+					vertexBufferOffsets(vertexBufferOffsets), indexVkBuffer(indexVkBuffer) {}
 
 			inline Mesh(Mesh&& other) noexcept
-				: _reference(other._reference), UID(other.UID), vertexVkBufferCount(other.vertexVkBufferCount), vertexVkBuffers(other.vertexVkBuffers),
+				: reference(other.reference), UID(other.UID), vertexVkBufferCount(other.vertexVkBufferCount), vertexVkBuffers(other.vertexVkBuffers),
 					indexVkBuffer(other.indexVkBuffer) {
-				other._reference = nullptr;
+				other.reference = nullptr;
 				other.UID = 0;
 				other.vertexVkBufferCount = 0;
 				other.vertexVkBuffers = VK_NULL_HANDLE;
 				indexVkBuffer = VK_NULL_HANDLE;
-				*_reference = this;
+				*reference = this;
 			}
 
 			constexpr inline bool operator==(const Mesh& other) const {
@@ -267,9 +281,10 @@ namespace simple {
 				other._UID = 0;
 			}
 
-			inline const Mesh* AddMesh(Mesh** meshReference, uint32_t vertexBufferCount, VkBuffer* vertexBuffers, VkBuffer indexBuffer) noexcept {
+			template<uint32_t T_vertex_buffer_count>
+			inline const Mesh* AddMesh(Mesh** meshReference, VkBuffer vertexBuffers[T_vertex_buffer_count], VkDeviceSize vertexBufferOffsets[T_vertex_buffer_count], VkBuffer indexBuffer) noexcept {
 				std::lock_guard<std::mutex> lock(_meshesMutex);
-				return &_meshes.EmplaceBack(meshReference, UID::Shuffle(_meshUIDState), vertexBufferCount, vertexBuffers, indexBuffer);
+				return &_meshes.EmplaceBack(meshReference, UID::Shuffle(_meshUIDState), T_vertex_buffer_count, vertexBuffers, vertexBufferOffsets, indexBuffer);
 			}
 
 			inline bool RemoveMesh(const Mesh& mesh) {
@@ -344,17 +359,19 @@ namespace simple {
 		};
 
 		template<uint32_t T_color_attachment_count>
-		inline RenderingContext(const RenderArea& renderArea, RenderingAttachment colorAttachments[T_color_attachment_count], 
-			RenderingAttachment* pDepthAttachment, RenderingAttachment* pStencilAttachment) noexcept 
-			: _renderArea(renderArea), _colorAttachmentCount(T_color_attachment_count), _pColorAttachments(colorAttachments),
-				_pDepthAttachment(pDepthAttachment), _pStencilAttachment(pStencilAttachment), _pipelinesUIDState(UID::GenerateState64()) {}
+		void Initialize(RenderingAttachment colorAttachments[T_color_attachment_count], 
+			RenderingAttachment* pDepthAttachment, RenderingAttachment* pStencilAttachment) {
+			_colorAttachmentCount = T_color_attachment_count;
+			_pDepthAttachment = pDepthAttachment;
+			_pStencilAttachment = pStencilAttachment;
+		}
 
 		inline const Pipeline* AddPipeline(Pipeline** pipelineReference, VkPipeline vkPipeline, VkPipelineLayout vkPipelineLayout) {
 			std::lock_guard<std::mutex> lock(_pipelinesMutex);
 			return &_pipelines.EmplaceBack(pipelineReference, UID::Shuffle(_pipelinesUIDState), vkPipeline, vkPipelineLayout);
 		}
 
-		inline bool RemovePipeline(const Pipeline& pipeline) {
+		inline bool RemovePipeline(const Pipeline& pipeline) noexcept {
 			std::lock_guard<std::mutex> lock(_pipelinesMutex);
 			auto iter = _pipelines.Find(pipeline);
 			if (iter == _pipelines.end()) {
@@ -365,13 +382,17 @@ namespace simple {
 			return true;
 		}
 
+		inline void SetRenderArea(const RenderArea& renderArea) noexcept {
+			_renderArea = renderArea;
+		}
+
 	private:
 
-		RenderArea _renderArea;
-		uint32_t _colorAttachmentCount;
-		RenderingAttachment* _pColorAttachments;
-		RenderingAttachment* _pDepthAttachment;
-		RenderingAttachment* _pStencilAttachment;
+		RenderArea _renderArea{};
+		uint32_t _colorAttachmentCount{};
+		RenderingAttachment* _pColorAttachments{};
+		RenderingAttachment* _pDepthAttachment{};
+		RenderingAttachment* _pStencilAttachment{};
 
 		DynamicArray<Pipeline> _pipelines{};
 		std::mutex _pipelinesMutex{};
@@ -598,7 +619,19 @@ namespace simple {
 					.pStencilAttachment = context->_pStencilAttachment,
 				};
 				vkCmdBeginRendering(renderCommandBuffer, &vkRenderingInfo);
+				for (RenderingContext::Pipeline& pipeline : _activeRenderingContexts[i]->_pipelines) {
+					vkCmdBindPipeline(renderCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline._vkPipeline);
+					for (RenderingContext::ShaderObject& shaderObject : pipeline._shaderObjects)  {
+						vkCmdBindDescriptorSets(renderCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline._vkPipelineLayout,
+							0, shaderObject._vkDescriptorSetCount, shaderObject._vkDescriptorSets, 0, nullptr);
+						for (RenderingContext::Mesh& mesh : shaderObject._meshes) {
+							vkCmdBindVertexBuffers(renderCommandBuffer, 0, mesh.vertexVkBufferCount, mesh.vertexVkBuffers, mesh.vertexBufferOffsets);
+							vkCmdBindIndexBuffer(renderCommandBuffer, mesh.indexVkBuffer, 0, VK_INDEX_TYPE_UINT32);
+						}
+					}
+				}
 				vkCmdEndRendering(renderCommandBuffer);
+				_activeRenderingContexts[i] = nullptr;
 			}
 
 			VkImageMemoryBarrier finalSwapchainMemoryBarrier {
@@ -837,9 +870,15 @@ namespace simple {
 	class Image {
 	public:
 
-		inline Image(Simple& engine) noexcept : _engine(engine) {}
+		inline Image() noexcept : _pEngine(nullptr) {}
+
+		inline Image(Simple& pEngine) noexcept : _pEngine(&pEngine) {}
 
 		inline Image(Image&& other) noexcept;
+
+		inline void Initialize(Simple& engine) {
+			_pEngine = &engine;
+		}
 
 		bool IsNull() const noexcept {
 			return _vkImage == VK_NULL_HANDLE;
@@ -882,13 +921,13 @@ namespace simple {
 				.pQueueFamilyIndices = pQueueFamilyIndices,
 				.initialLayout = initialLayout,
 			};
-			VkResult vkResult = vkCreateImage(_engine._backend._vkDevice, &createInfo, _engine._backend._vkAllocationCallbacks, &_vkImage);
+			VkResult vkResult = vkCreateImage(_pEngine->_backend._vkDevice, &createInfo, _pEngine->_backend._vkAllocationCallbacks, &_vkImage);
 			if (!Succeeded(vkResult)) {
 				logError(this, "failed to create VkImage (function vkCreateImage) for simple::Image");
 				return vkResult;
 			}
 			VkMemoryRequirements vkMemRequirements;
-			vkGetImageMemoryRequirements(_engine._backend._vkDevice, _vkImage, &vkMemRequirements);
+			vkGetImageMemoryRequirements(_pEngine->_backend._vkDevice, _vkImage, &vkMemRequirements);
 			VkMemoryAllocateInfo vkAllocInfo {
 				.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 				.pNext = nullptr,
@@ -896,14 +935,14 @@ namespace simple {
 			};
 			if (!Succeeded(vkResult)) {
 				logError(this, "failed to allocate memory (function vkAllocateMemory) for simple::Image");
-				vkDestroyImage(_engine._backend._vkDevice, _vkImage, _engine._backend._vkAllocationCallbacks);
+				vkDestroyImage(_pEngine->_backend._vkDevice, _vkImage, _pEngine->_backend._vkAllocationCallbacks);
 				return vkResult;
 			}
-			vkResult = vkBindImageMemory(_engine._backend._vkDevice, _vkImage, _vkDeviceMemory, 0);
+			vkResult = vkBindImageMemory(_pEngine->_backend._vkDevice, _vkImage, _vkDeviceMemory, 0);
 			if (!Succeeded(vkResult)) {
 				logError(this, "failed to bind image memory (function vkBindImageMemory) for simple::Image");
-				vkDestroyImage(_engine._backend._vkDevice, _vkImage, _engine._backend._vkAllocationCallbacks);
-				vkFreeMemory(_engine._backend._vkDevice, _vkDeviceMemory, _engine._backend._vkAllocationCallbacks);
+				vkDestroyImage(_pEngine->_backend._vkDevice, _vkImage, _pEngine->_backend._vkAllocationCallbacks);
+				vkFreeMemory(_pEngine->_backend._vkDevice, _vkDeviceMemory, _pEngine->_backend._vkAllocationCallbacks);
 				return vkResult;
 			}
 			_layout = static_cast<ImageLayout>(initialLayout);
@@ -938,7 +977,7 @@ namespace simple {
 				.components = components,
 				.subresourceRange = subresourceRange
 			};
-			VkResult vkResult = vkCreateImageView(_engine._backend._vkDevice, &createInfo, _engine._backend._vkAllocationCallbacks, &out);
+			VkResult vkResult = vkCreateImageView(_pEngine->_backend._vkDevice, &createInfo, _pEngine->_backend._vkAllocationCallbacks, &out);
 			if (!Succeeded(vkResult)) {
 				logError(this, "failed to create VkImageView (function vkCreateImageView) for simple::ImageView");
 				return vkResult;
@@ -947,9 +986,9 @@ namespace simple {
 		}
 
 		void Terminate() noexcept {
-			vkFreeMemory(_engine._backend._vkDevice, _vkDeviceMemory, _engine._backend._vkAllocationCallbacks);
+			vkFreeMemory(_pEngine->_backend._vkDevice, _vkDeviceMemory, _pEngine->_backend._vkAllocationCallbacks);
 			_vkDeviceMemory = VK_NULL_HANDLE;
-			vkDestroyImage(_engine._backend._vkDevice, _vkImage, _engine._backend._vkAllocationCallbacks);
+			vkDestroyImage(_pEngine->_backend._vkDevice, _vkImage, _pEngine->_backend._vkAllocationCallbacks);
 			_vkImage = VK_NULL_HANDLE;
 			_layout = ImageLayout::Undefined;
 			_extent = { 0, 0, 0 };
@@ -963,7 +1002,7 @@ namespace simple {
 
 	private:
 
-		Simple& _engine;
+		Simple* _pEngine;
 		VkImage _vkImage = VK_NULL_HANDLE;
 		VkDeviceMemory _vkDeviceMemory = VK_NULL_HANDLE;
 		ImageLayout _layout{};
