@@ -3,7 +3,6 @@
 #include "simple.hpp"
 #include "simple_algorithm.hpp"
 #include "simple_dynamic_array.hpp"
-#include "vulkan/vulkan_core.h"
 #ifdef FRAMES_IN_FLIGHT
 #else
 #define FRAMES_IN_FLIGHT 2U
@@ -13,6 +12,7 @@
 #include "simple_array.hpp"
 #include "simple_set.hpp"
 #include "simple_map.hpp"
+#include "simple_UID.hpp"
 #include "vulkan/vulkan.h"
 #include <assert.h>
 #include <thread>
@@ -218,11 +218,174 @@ namespace simple {
 		VkCommandBuffer _vkCommandBuffer;
 	};
 
+	typedef VkRenderingAttachmentInfo RenderingAttachment;
+	typedef VkRect2D RenderArea;
+
+	class RenderingContext {
+	public:
+
+		struct Mesh {
+
+			Mesh** _reference;
+			uint64_t UID;
+			uint32_t vertexVkBufferCount;
+			VkBuffer* vertexVkBuffers;
+			VkBuffer indexVkBuffer;
+
+			inline Mesh(Mesh** reference, uint64_t UID, uint32_t vertexVkBufferCount, VkBuffer* vertexVkBuffers, VkBuffer indexVkBuffer) noexcept
+				: _reference(reference), UID(UID), vertexVkBufferCount(), vertexVkBuffers(vertexVkBuffers), indexVkBuffer(indexVkBuffer) {}
+
+			inline Mesh(Mesh&& other) noexcept
+				: _reference(other._reference), UID(other.UID), vertexVkBufferCount(other.vertexVkBufferCount), vertexVkBuffers(other.vertexVkBuffers),
+					indexVkBuffer(other.indexVkBuffer) {
+				other._reference = nullptr;
+				other.UID = 0;
+				other.vertexVkBufferCount = 0;
+				other.vertexVkBuffers = VK_NULL_HANDLE;
+				indexVkBuffer = VK_NULL_HANDLE;
+				*_reference = this;
+			}
+
+			constexpr inline bool operator==(const Mesh& other) const {
+				return UID == other.UID;
+			}
+		};
+
+		struct ShaderObject {
+
+			inline ShaderObject(ShaderObject** reference, uint64_t UID, uint32_t vkDescriptorSetCount, VkDescriptorSet* vkDescriptorSets) noexcept 
+				: _reference(reference), _UID(UID), _vkDescriptorSetCount(vkDescriptorSetCount), _vkDescriptorSets(vkDescriptorSets), _meshUIDState(UID::GenerateState64()) {}
+			
+			inline ShaderObject(ShaderObject&& other) noexcept 
+				: _reference(other._reference), _UID(other._UID), _vkDescriptorSetCount(other._vkDescriptorSetCount), _vkDescriptorSets(other._vkDescriptorSets),
+					_meshUIDState() {
+				std::lock_guard<std::mutex> lock(other._meshesMutex);
+				_meshUIDState = other._meshUIDState.load();
+				new(&_meshes) DynamicArray<Mesh>(std::move(other._meshes));
+				*_reference = this;
+				other._reference = nullptr;
+				other._UID = 0;
+			}
+
+			inline const Mesh* AddMesh(Mesh** meshReference, uint32_t vertexBufferCount, VkBuffer* vertexBuffers, VkBuffer indexBuffer) noexcept {
+				std::lock_guard<std::mutex> lock(_meshesMutex);
+				return &_meshes.EmplaceBack(meshReference, UID::Shuffle(_meshUIDState), vertexBufferCount, vertexBuffers, indexBuffer);
+			}
+
+			inline bool RemoveMesh(const Mesh& mesh) {
+				std::lock_guard<std::mutex> lock(_meshesMutex);
+				auto iter = _meshes.Find(mesh);
+				if (iter == _meshes.end()) {
+					logError(this, "failed to remove mesh (function simple::RenderingContext::ShaderObject::RemoveMesh), may indicate invalid simple::RenderingContext::Mesh handle");
+					return false;
+				}
+				_meshes.Erase(iter);
+				return true;
+			}
+
+			struct Hash {
+				inline uint64_t operator()(const ShaderObject& shaderObject) {
+					return shaderObject._UID;
+				}
+			};
+
+		private:
+
+			ShaderObject** _reference;
+			uint64_t _UID;
+			uint32_t _vkDescriptorSetCount;
+			VkDescriptorSet* _vkDescriptorSets;
+			DynamicArray<Mesh> _meshes{};
+			std::mutex _meshesMutex{};
+			std::atomic<uint64_t> _meshUIDState;
+
+			friend class Backend;
+		};
+
+		struct Pipeline {
+		public:	
+
+			inline Pipeline(Pipeline** reference, uint64_t UID, VkPipeline vkPipeline, VkPipelineLayout vkPipelineLayout) noexcept
+				: _reference(reference), _UID(UID), _vkPipeline(vkPipeline), _vkPipelineLayout(vkPipelineLayout), _shaderObjectsUIDState(UID::GenerateState64()) {}
+
+			inline Pipeline(Pipeline&& other) noexcept 
+				: _reference(other._reference), _UID(other._UID), _vkPipeline(other._vkPipeline), _vkPipelineLayout(other._vkPipelineLayout),
+					_shaderObjectsUIDState() {
+				std::lock_guard<std::mutex> lock(other._shaderObjectsMutex);
+				_shaderObjectsUIDState = other._shaderObjectsUIDState.load();
+				new(&_shaderObjects) DynamicArray<ShaderObject>(std::move(other._shaderObjects));
+				*_reference = this;
+				other._reference = nullptr;
+				other._UID = 0;
+			}
+
+			template<uint32_t T_descriptor_set_count>
+			inline const ShaderObject* AddShaderObject(ShaderObject** shaderObjectReference, VkDescriptorSet vkDescriptorSets[T_descriptor_set_count]) {
+				std::lock_guard<std::mutex> lock(_shaderObjectsMutex);
+				return *_shaderObjects.EmplaceBack(shaderObjectReference, UID::Shuffle(_shaderObjectsUIDState), T_descriptor_set_count, vkDescriptorSets);
+			}
+
+			constexpr inline bool operator==(const Pipeline& other) const {
+				return _UID == other._UID;
+			}
+
+		private:
+
+			Pipeline** _reference;
+			uint64_t _UID;
+			VkPipeline _vkPipeline;
+			VkPipelineLayout _vkPipelineLayout;
+
+			DynamicArray<ShaderObject> _shaderObjects{};
+			std::mutex _shaderObjectsMutex{};
+			std::atomic<uint64_t> _shaderObjectsUIDState;
+
+			friend class Backend;
+		};
+
+		template<uint32_t T_color_attachment_count>
+		inline RenderingContext(const RenderArea& renderArea, RenderingAttachment colorAttachments[T_color_attachment_count], 
+			RenderingAttachment* pDepthAttachment, RenderingAttachment* pStencilAttachment) noexcept 
+			: _renderArea(renderArea), _colorAttachmentCount(T_color_attachment_count), _pColorAttachments(colorAttachments),
+				_pDepthAttachment(pDepthAttachment), _pStencilAttachment(pStencilAttachment), _pipelinesUIDState(UID::GenerateState64()) {}
+
+		inline const Pipeline* AddPipeline(Pipeline** pipelineReference, VkPipeline vkPipeline, VkPipelineLayout vkPipelineLayout) {
+			std::lock_guard<std::mutex> lock(_pipelinesMutex);
+			return &_pipelines.EmplaceBack(pipelineReference, UID::Shuffle(_pipelinesUIDState), vkPipeline, vkPipelineLayout);
+		}
+
+		inline bool RemovePipeline(const Pipeline& pipeline) {
+			std::lock_guard<std::mutex> lock(_pipelinesMutex);
+			auto iter = _pipelines.Find(pipeline);
+			if (iter == _pipelines.end()) {
+				logError(this, "failed to remove mesh (function simple::RenderingContext::ShaderObject::RemoveMesh), may indicate invalid simple::RenderingContext::Mesh handle");
+				return false;
+			}
+			_pipelines.Erase(iter);
+			return true;
+		}
+
+	private:
+
+		RenderArea _renderArea;
+		uint32_t _colorAttachmentCount;
+		RenderingAttachment* _pColorAttachments;
+		RenderingAttachment* _pDepthAttachment;
+		RenderingAttachment* _pStencilAttachment;
+
+		DynamicArray<Pipeline> _pipelines{};
+		std::mutex _pipelinesMutex{};
+		std::atomic<uint64_t> _pipelinesUIDState;
+
+		friend class Backend;
+	};
+
 	class Backend {
 	public:
 
 		static constexpr inline VkPipelineStageFlags image_transition_src_stage_mask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 		static constexpr inline VkPipelineStageFlags image_transition_dst_stage_mask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+		static constexpr inline uint32_t max_active_rendering_context_count = 512;
 
 		Backend(Simple& engine);
 
@@ -285,6 +448,10 @@ namespace simple {
 		VkPresentModeKHR _vkPresentModeKHR{};
 		Array<VkImage, FRAMES_IN_FLIGHT> _swapchainImages{};
 		Array<VkImageView, FRAMES_IN_FLIGHT> _swapchainImageViews{};
+
+		std::atomic<uint32_t> _activeRenderingContextCount{};
+		Array<RenderingContext*, max_active_rendering_context_count> _activeRenderingContexts{};
+		std::mutex _activeRenderingContextsMutex{};
 
 		uint32_t _currentRenderFrame{};
 
@@ -415,6 +582,25 @@ namespace simple {
 			vkCmdBeginRendering(renderCommandBuffer, &swapchainClearRenderingInfo);
 			vkCmdEndRendering(renderCommandBuffer);
 
+			std::lock_guard<std::mutex> activeRenderingContextsLock(_activeRenderingContextsMutex);
+			for (uint32_t i = 0; i < _activeRenderingContextCount; i++) {
+				RenderingContext* context = _activeRenderingContexts[i];
+				VkRenderingInfo vkRenderingInfo {
+					.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+					.pNext = nullptr,
+					.flags = 0,
+					.renderArea = context->_renderArea,
+					.layerCount = 1,
+					.viewMask = 0,
+					.colorAttachmentCount = context->_colorAttachmentCount,
+					.pColorAttachments = context->_pColorAttachments,
+					.pDepthAttachment = context->_pDepthAttachment,
+					.pStencilAttachment = context->_pStencilAttachment,
+				};
+				vkCmdBeginRendering(renderCommandBuffer, &vkRenderingInfo);
+				vkCmdEndRendering(renderCommandBuffer);
+			}
+
 			VkImageMemoryBarrier finalSwapchainMemoryBarrier {
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
 				.pNext = nullptr,
@@ -438,7 +624,6 @@ namespace simple {
 				0, 0, nullptr, 0, nullptr, 1, &finalSwapchainMemoryBarrier);
 
 			vkEndCommandBuffer(renderCommandBuffer);
-
 		}
 
 		inline void _Render() {
@@ -571,7 +756,16 @@ namespace simple {
 			return _backend;
 		}
 
-		bool Quitting() {
+		inline bool PushRenderingContext(RenderingContext* pRenderingContext) {
+			std::lock_guard<std::mutex> lock(_backend._activeRenderingContextsMutex);
+			if (Backend::max_active_rendering_context_count <= _backend._activeRenderingContextCount) {
+				return false;
+			}
+			_backend._activeRenderingContexts[_backend._activeRenderingContextCount++] = pRenderingContext;
+			return true;
+		}
+
+		inline bool Quitting() {
 			WindowSystem::PollEvents();
 			return glfwWindowShouldClose(_window.GetRawPointer());
 		}
