@@ -278,13 +278,15 @@ namespace simple {
 		Array<VkSemaphore, FRAMES_IN_FLIGHT> _frameReadyVkSemaphores{};
 		Array<VkSemaphore, FRAMES_IN_FLIGHT> _frameFinishedVkSemaphores{};
 		Array<VkFence, FRAMES_IN_FLIGHT> _inFlightVkFences{};
-		Array<VkCommandBuffer, FRAMES_IN_FLIGHT> _vkRenderingCommandBuffers{};
+		Array<VkCommandBuffer, FRAMES_IN_FLIGHT> _renderingVkCommandBuffers{};
 		VkSwapchainKHR _vkSwapchainKHR{};
 		VkExtent2D _swapchainVkExtent2D{};
 		VkSurfaceFormatKHR _vkSurfaceFormatKHR{};
 		VkPresentModeKHR _vkPresentModeKHR{};
 		Array<VkImage, FRAMES_IN_FLIGHT> _swapchainImages{};
 		Array<VkImageView, FRAMES_IN_FLIGHT> _swapchainImageViews{};
+
+		uint32_t _currentRenderFrame{};
 
 		inline Thread* _NewThread(std::thread&& thread) {
 
@@ -320,9 +322,205 @@ namespace simple {
 			_queuedGraphicsCommandBuffers.PushBack(commandBuffer);
 		}
 
+		inline simple::DynamicArray<VkCommandBuffer>&& _MoveGraphicsCommandBuffers() {
+			std::lock_guard<std::mutex> lock(_queuedGraphicsCommandBuffersMutex);
+			return std::move(_queuedGraphicsCommandBuffers);
+		}
+
 		void _CreateSwapchain();
 
+		void _RecreateSwapchain() {
+			vkDestroySwapchainKHR(_vkDevice, _vkSwapchainKHR, _vkAllocationCallbacks);
+			for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
+				vkDestroyImageView(_vkDevice, _swapchainImageViews[i], _vkAllocationCallbacks);
+			}
+			_CreateSwapchain();
+		}
+
+		inline void _RenderCmds() {
+			VkCommandBuffer renderCommandBuffer = _renderingVkCommandBuffers[_currentRenderFrame];
+			VkCommandBufferBeginInfo renderCommandBufferBeginInfo {
+				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+				.pNext = nullptr,
+				.flags = 0,
+				.pInheritanceInfo = nullptr,
+			};
+
+			assert(Succeeded(vkBeginCommandBuffer(renderCommandBuffer, &renderCommandBufferBeginInfo)));
+
+			VkImageMemoryBarrier initialSwapchainMemBarrier {
+				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+				.pNext = nullptr,
+				.srcAccessMask = 0,
+				.dstAccessMask = 0,
+				.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+				.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.image = _swapchainImages[_currentRenderFrame],
+				.subresourceRange {
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.baseMipLevel = 0,
+					.levelCount = 1,
+					.baseArrayLayer = 0,
+					.layerCount = 1
+				},
+			};
+
+			vkCmdPipelineBarrier(renderCommandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 
+				0, 0, nullptr, 0, nullptr, 1, &initialSwapchainMemBarrier);
+
+			VkViewport swapchainViewport {
+				.x = 0.0f,
+				.y = 0.0f,
+				.width = static_cast<float>(_swapchainVkExtent2D.width),
+				.height = static_cast<float>(_swapchainVkExtent2D.height),
+				.minDepth = 0.0f,
+				.maxDepth = 1.0f,
+			};
+
+			VkRect2D swapchainScissor {
+				.offset = { 0, 0 },
+				.extent = _swapchainVkExtent2D,
+			};
+
+			vkCmdSetViewport(renderCommandBuffer, 0, 1, &swapchainViewport);
+			vkCmdSetScissor(renderCommandBuffer, 0, 1, &swapchainScissor);
+
+			VkRenderingAttachmentInfo swapchainClearColorAttachment {
+				.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+				.pNext = nullptr,
+				.imageView = _swapchainImageViews[_currentRenderFrame],
+				.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				.resolveMode = VK_RESOLVE_MODE_NONE,
+				.resolveImageView = VK_NULL_HANDLE,
+				.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+				.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+				.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+				.clearValue { 0.0f, 0.0f, 0.0f, 0.0f }
+			};
+
+			VkRenderingInfo swapchainClearRenderingInfo {
+				.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+				.pNext = nullptr,
+				.flags = 0,
+				.renderArea { { 0, 0 }, _swapchainVkExtent2D },
+				.layerCount = 1,
+				.viewMask = 0,
+				.colorAttachmentCount = 1,
+				.pColorAttachments = &swapchainClearColorAttachment,
+				.pDepthAttachment = nullptr,
+			};
+
+			vkCmdBeginRendering(renderCommandBuffer, &swapchainClearRenderingInfo);
+			vkCmdEndRendering(renderCommandBuffer);
+
+			VkImageMemoryBarrier finalSwapchainMemoryBarrier {
+				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+				.pNext = nullptr,
+				.srcAccessMask = 0,
+				.dstAccessMask = 0,
+				.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.image = _swapchainImages[_currentRenderFrame],
+				.subresourceRange {
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.baseMipLevel = 0,
+					.levelCount = 1,
+					.baseArrayLayer = 0,
+					.layerCount = 1
+				},
+			};
+
+			vkCmdPipelineBarrier(renderCommandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 
+				0, 0, nullptr, 0, nullptr, 1, &finalSwapchainMemoryBarrier);
+
+			vkEndCommandBuffer(renderCommandBuffer);
+
+		}
+
+		inline void _Render() {
+			if (_swapchainVkExtent2D.width == 0 || _swapchainVkExtent2D.height == 0) {
+				return;
+			}
+			vkWaitForFences(_vkDevice, 1, &_inFlightVkFences[_currentRenderFrame], VK_TRUE, UINT64_MAX);
+			uint32_t imageIndex;
+			VkResult result = vkAcquireNextImageKHR(_vkDevice, _vkSwapchainKHR, UINT64_MAX, _frameReadyVkSemaphores[_currentRenderFrame], nullptr, &imageIndex);
+			if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+				_RecreateSwapchain();
+				return;
+			}
+			else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+				return;
+			}
+			assert(imageIndex < FRAMES_IN_FLIGHT);
+			vkResetFences(_vkDevice, 1, &_inFlightVkFences[_currentRenderFrame]);
+
+			vkResetCommandBuffer(_renderingVkCommandBuffers[_currentRenderFrame], 0);
+			_RenderCmds();
+	
+			simple::DynamicArray<VkCommandBuffer> graphicsCommandBuffers(std::move(_MoveGraphicsCommandBuffers()));
+
+			VkSubmitInfo graphicsVkSubmitInfo {
+				.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+				.waitSemaphoreCount = 0,
+				.pWaitSemaphores = nullptr,
+				.pWaitDstStageMask = nullptr,
+				.commandBufferCount = graphicsCommandBuffers.Size(),
+				.pCommandBuffers = graphicsCommandBuffers.Data(),
+				.signalSemaphoreCount = 0,
+				.pSignalSemaphores = nullptr,
+			};
+
+			VkPipelineStageFlags waitStages[1] { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+
+			VkSubmitInfo renderVkSubmitInfo {
+				.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+				.waitSemaphoreCount = 1,
+				.pWaitSemaphores = &_frameReadyVkSemaphores[_currentRenderFrame],
+				.pWaitDstStageMask = waitStages,
+				.commandBufferCount = 1,
+				.pCommandBuffers = &_renderingVkCommandBuffers[_currentRenderFrame],
+				.signalSemaphoreCount = 1,
+				.pSignalSemaphores = &_frameFinishedVkSemaphores[_currentRenderFrame],
+			};
+
+			simple::Array<VkSubmitInfo, 2> graphicsVkSubmitInfos = { graphicsVkSubmitInfo, renderVkSubmitInfo };
+
+			assert(Succeeded(vkQueueSubmit(_graphicsQueue.vkQueue, graphicsVkSubmitInfos.Size(), graphicsVkSubmitInfos.Data(), _inFlightVkFences[_currentRenderFrame]))
+				&& "failed to submit graphics command buffers (function vkQueueSubmit in simple::Backend::_Render)");
+
+			VkPresentInfoKHR vkPresentInfoKHR {
+				.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+				.waitSemaphoreCount = 1,
+				.pWaitSemaphores = &_frameFinishedVkSemaphores[_currentRenderFrame],
+				.swapchainCount = 1,
+				.pSwapchains = &_vkSwapchainKHR,
+				.pImageIndices = &imageIndex,
+				.pResults = nullptr,
+			};
+			result = vkQueuePresentKHR(_graphicsQueue.vkQueue, &vkPresentInfoKHR);
+
+			_currentRenderFrame = (_currentRenderFrame + 1) % FRAMES_IN_FLIGHT;
+
+			switch (result) {
+				case VK_SUCCESS:
+					return;
+				case VK_ERROR_OUT_OF_DATE_KHR:
+					_RecreateSwapchain();
+					return;
+				case VK_SUBOPTIMAL_KHR:
+					_RecreateSwapchain();
+					return;
+				default:
+					return;
+			}
+		}
+
 		inline void _Terminate() {
+			vkDeviceWaitIdle(_vkDevice);
 			std::lock_guard<std::mutex> lock(_threadsMutex);
 			vkDestroyCommandPool(_vkDevice, _mainThread._vkGraphicsCommandPool, _vkAllocationCallbacks);
 			vkDestroyCommandPool(_vkDevice, _mainThread._vkTransferCommandPool, _vkAllocationCallbacks);
@@ -351,13 +549,38 @@ namespace simple {
 
 	class Simple {
 	public:
+
 		constexpr static inline const char* engine_name = "Simple";
 		constexpr static inline const char* app_name = "Simple";
 
 		inline Simple(Window&& window) : _backend(*this), _window(std::move(window)) {}
-		Backend& GetBackend();
+
+		inline Backend& GetBackend() {
+			return _backend;
+		}
+
+		bool Quitting() {
+			WindowSystem::PollEvents();
+			return glfwWindowShouldClose(_window.GetRawPointer());
+		}
+
+#ifdef EDITOR
+		inline bool EditorUpdate() {
+			return true;
+		}
+#endif
+
+		inline void LogicUpdate() {
+		}
+
+		inline void Render() {
+			_backend._Render();
+		}
+
 		~Simple();
+
 	private:
+
 		Window _window;
 		Backend _backend;
 
