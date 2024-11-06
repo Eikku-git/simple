@@ -41,7 +41,7 @@ namespace simple {
 #ifdef _DEBUG
 	constexpr size_t layers_to_enable_count = 1;
 #else
-	constexpr size_t layer_count = 0;
+	constexpr size_t layers_to_enable_count = 0;
 #endif
 
 	const String<> layersToEnable[] {
@@ -157,7 +157,7 @@ namespace simple {
 			imageLayoutTransitionMemoryBarriers[i].srcAccessMask = 0;
 			imageLayoutTransitionMemoryBarriers[i].dstAccessMask = 0;
 			imageLayoutTransitionMemoryBarriers[i].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-			imageLayoutTransitionMemoryBarriers[i].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			imageLayoutTransitionMemoryBarriers[i].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 			imageLayoutTransitionMemoryBarriers[i].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 			imageLayoutTransitionMemoryBarriers[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 			imageLayoutTransitionMemoryBarriers[i].image = _swapchainImages[i];
@@ -170,9 +170,32 @@ namespace simple {
 			};
 		}
 		vkCmdPipelineBarrier(imageLayoutTransitionCommandBuffer.Begin(), image_transition_src_stage_mask, image_transition_dst_stage_mask, 
-		0, 0, nullptr, 0, nullptr, FRAMES_IN_FLIGHT, imageLayoutTransitionMemoryBarriers.Data());
+			0, 0, nullptr, 0, nullptr, FRAMES_IN_FLIGHT, imageLayoutTransitionMemoryBarriers.Data());
 		imageLayoutTransitionCommandBuffer.End();
 		imageLayoutTransitionCommandBuffer.Submit();
+	}
+
+	static inline void DummySubmit(VkCommandBuffer commandBuffer, VkQueue queue, VkFence fence) {
+		VkCommandBufferBeginInfo beginInfo {
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+			.pNext = nullptr,
+			.flags = 0,
+			.pInheritanceInfo = nullptr
+		};
+		vkBeginCommandBuffer(commandBuffer, &beginInfo);
+		vkEndCommandBuffer(commandBuffer);
+		VkSubmitInfo submitInfo {
+			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+			.waitSemaphoreCount = 0,
+			.pWaitSemaphores = nullptr,
+			.pWaitDstStageMask = nullptr,
+			.commandBufferCount = 1,
+			.pCommandBuffers = &commandBuffer,
+			.signalSemaphoreCount = 0,
+			.pSignalSemaphores = nullptr,
+		};
+		vkQueueSubmit(queue, 1, &submitInfo, fence);
+		vkQueueWaitIdle(queue);
 	}
 
 	Backend::Backend(Simple& engine) : _engine(engine) { 
@@ -336,7 +359,7 @@ namespace simple {
 			.commandBufferCount = FRAMES_IN_FLIGHT,
 		};
 
-		assert(Succeeded(vkAllocateCommandBuffers(_vkDevice, &vkRenderingCommandBufferAllocInfo, _vkRenderingCommandBuffers.Data())) && "failed to allocate rendering command buffers (simple::Backend constructor)!");
+		assert(Succeeded(vkAllocateCommandBuffers(_vkDevice, &vkRenderingCommandBufferAllocInfo, _renderingVkCommandBuffers.Data())) && "failed to allocate rendering command buffers (simple::Backend constructor)!");
 
 		VkSemaphoreCreateInfo vkSemaphoreCreateInfo {
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
@@ -361,6 +384,7 @@ namespace simple {
 				) &&
 				"failed to create VkSemaphores/VkFences (vkCreateSemaphore/vkCreateFence) (simple::Backend constructor)"
 			);
+			DummySubmit(_renderingVkCommandBuffers[0], _graphicsQueue.vkQueue, _inFlightVkFences[i]);
 		}
 
 		_vkSurfaceFormatKHR = _vulkanPhysicalDeviceInfo.vkSurfaceFormatsKHR[0];
@@ -379,10 +403,6 @@ namespace simple {
 		}
 
 		_CreateSwapchain();
-	}
-
-	Backend& Simple::GetBackend() {
-		return _backend;
 	}
 
 	Simple::~Simple() {
