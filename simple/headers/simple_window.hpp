@@ -214,13 +214,14 @@ namespace simple {
 	class Window {
 	public:
 
-		inline Window(Simple& engine) noexcept : _engine(engine), _pGlfwWindow(nullptr), _pInput(nullptr) {}
+		inline Window() noexcept : _pGlfwWindow(nullptr), _pInput(nullptr) {}
 
-		inline Window(Window&& other) noexcept : _engine(other._engine), _pGlfwWindow(other._pGlfwWindow), _pInput(other._pInput) {
+		inline Window(Window&& other) noexcept : _pEngine(other._pEngine), _pGlfwWindow(other._pGlfwWindow), _pInput(other._pInput) {
 			if (other._pGlfwWindow) {
 				Window** ppWindow = WindowSystem::_GetppWindow(_pGlfwWindow);
 				*ppWindow = this;
 			}
+			other._pEngine = nullptr;
 			other._pGlfwWindow = nullptr;
 			other._pInput = nullptr;
 		}
@@ -256,11 +257,12 @@ namespace simple {
 
 	private:
 
-		Simple& _engine;
+		Simple* _pEngine;
 		GLFWwindow* _pGlfwWindow = nullptr;
 		Input* _pInput = nullptr;
 
 		friend class WindowSystem;
+		friend class Simple;
 	};
 }
 
