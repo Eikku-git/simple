@@ -206,8 +206,8 @@ namespace simple {
 
 		simple::DynamicArray<MouseButton> _activeMouseButtons;
 
-		DVec2 _cursorPos;
-		DVec2 _deltaCursorPos;
+		DoubleVec2 _cursorPos;
+		DoubleVec2 _deltaCursorPos;
 		friend class Window;
 	};
 
