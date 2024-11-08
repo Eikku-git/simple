@@ -48,7 +48,7 @@ namespace simple {
 		"VK_LAYER_KHRONOS_validation",
 	};
 
-	const Array<const char*, 1> requiredDeviceExtensions {
+	const SimpleArray(const char*, 1) requiredDeviceExtensions {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 	};
 
@@ -81,9 +81,9 @@ namespace simple {
 			_swapchainVkExtent2D = actualExtent;
 		}
 
-		assert(FRAMES_IN_FLIGHT <= _vulkanPhysicalDeviceInfo.vkSurfaceCapabilitiesKHR.maxImageCount
+		assert(FramesInFlight <= _vulkanPhysicalDeviceInfo.vkSurfaceCapabilitiesKHR.maxImageCount
 			&& "FRAMES_IN_FLIGHT exceeds the maximum supported maximum image count given by vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
-		assert(FRAMES_IN_FLIGHT >= _vulkanPhysicalDeviceInfo.vkSurfaceCapabilitiesKHR.minImageCount
+		assert(FramesInFlight >= _vulkanPhysicalDeviceInfo.vkSurfaceCapabilitiesKHR.minImageCount
 			&& "FRAMES_IN_FLIGHT are less than the minimum supported image count given by vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
 
 		uint32_t queueFamilies[2] {
@@ -96,7 +96,7 @@ namespace simple {
 			.pNext = nullptr,
 			.flags = 0,
 			.surface = _vkSurfaceKHR,
-			.minImageCount = FRAMES_IN_FLIGHT,
+			.minImageCount = FramesInFlight,
 			.imageFormat = _vkSurfaceFormatKHR.format,
 			.imageColorSpace = _vkSurfaceFormatKHR.colorSpace,
 			.imageExtent = _swapchainVkExtent2D,
@@ -115,11 +115,11 @@ namespace simple {
 		assert(Succeeded(vkCreateSwapchainKHR(_vkDevice, &vkSwapchainCreateInfo, _vkAllocationCallbacks, &_vkSwapchainKHR))
 			&& "failed to create swapchains (function vkCreateSwapchainKHR in function simple::Backend::_CreateSwapchain)");
 
-		uint32_t imageCount = FRAMES_IN_FLIGHT;
+		uint32_t imageCount = FramesInFlight;
 		assert(Succeeded(vkGetSwapchainImagesKHR(_vkDevice, _vkSwapchainKHR, &imageCount, _swapchainImages.Data()))
 			&& "failed to get vulkan swapchain images (function vkGetSwapchainImagesKHR in function simple::Backend::_CreateSwapchain)");
 
-		for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
+		for (uint32_t i = 0; i < FramesInFlight; i++) {
 			VkImageViewCreateInfo imageViewInfo{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 				.pNext = nullptr,
@@ -150,8 +150,8 @@ namespace simple {
 
 		CommandBuffer imageLayoutTransitionCommandBuffer(GetNewGraphicsCommandBuffer(*thread));
 		imageLayoutTransitionCommandBuffer.Allocate();
-		Array<VkImageMemoryBarrier, FRAMES_IN_FLIGHT> imageLayoutTransitionMemoryBarriers{};
-		for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
+		FIFarray(VkImageMemoryBarrier) imageLayoutTransitionMemoryBarriers{};
+		for (uint32_t i = 0; i < FramesInFlight; i++) {
 			imageLayoutTransitionMemoryBarriers[i].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 			imageLayoutTransitionMemoryBarriers[i].pNext = nullptr;
 			imageLayoutTransitionMemoryBarriers[i].srcAccessMask = 0;
@@ -170,7 +170,7 @@ namespace simple {
 			};
 		}
 		vkCmdPipelineBarrier(imageLayoutTransitionCommandBuffer.Begin(), image_transition_src_stage_mask, image_transition_dst_stage_mask, 
-			0, 0, nullptr, 0, nullptr, FRAMES_IN_FLIGHT, imageLayoutTransitionMemoryBarriers.Data());
+			0, 0, nullptr, 0, nullptr, FramesInFlight, imageLayoutTransitionMemoryBarriers.Data());
 		imageLayoutTransitionCommandBuffer.End();
 		imageLayoutTransitionCommandBuffer.Submit();
 	}
@@ -198,7 +198,7 @@ namespace simple {
 		vkQueueWaitIdle(queue);
 	}
 
-	Backend::Backend(Simple& engine) : _engine(engine) { 
+	Backend::Backend(Simple& engine) : _engine(engine) {
 
 		_mainThread._stdThreadID = std::this_thread::get_id();
 
@@ -226,7 +226,7 @@ namespace simple {
 			logWarning(this, "some vulkan layer(s) requested are not supported (warning from simple::Backend constructor)!");
 		}
 
-		VkApplicationInfo appInfo {
+		VkApplicationInfo appInfo{
 			.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
 			.pNext = nullptr,
 			.pApplicationName = Simple::app_name,
@@ -236,7 +236,7 @@ namespace simple {
 			.apiVersion = VK_API_VERSION_1_3,
 		};
 
-		VkInstanceCreateInfo instanceCreateInfo {
+		VkInstanceCreateInfo instanceCreateInfo{
 			.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 			.pNext = nullptr,
 			.flags = 0,
@@ -247,7 +247,7 @@ namespace simple {
 			.ppEnabledExtensionNames = requiredInstanceExtensions.Data(),
 		};
 
-		assert(Succeeded(vkCreateInstance(&instanceCreateInfo, _vkAllocationCallbacks, &_vkInstance)) 
+		assert(Succeeded(vkCreateInstance(&instanceCreateInfo, _vkAllocationCallbacks, &_vkInstance))
 			&& "failed to create VkInstance (function vkCreateInstance) for simple::Backend");
 		assert(Succeeded(glfwCreateWindowSurface(_vkInstance, _engine._window.GetRawPointer(), _vkAllocationCallbacks, &_vkSurfaceKHR))
 			&& "failed to create window surface (function glfwCreateWindowSurface) for simple::Backend");
@@ -263,11 +263,11 @@ namespace simple {
 			bool allRequiredExtensionsFound = true;
 			for (const VkExtensionProperties& properties : deviceInfo.vkExtensionProperties) {
 				if (!Find(properties.extensionName, requiredDeviceExtensions.begin(), requiredDeviceExtensions.end())) {
-					allRequiredExtensionsFound = false;	
+					allRequiredExtensionsFound = false;
 				}
 			}
 			int score = 10;
-			if (!deviceInfo.vkPhysicalDeviceFeatures.samplerAnisotropy || 
+			if (!deviceInfo.vkPhysicalDeviceFeatures.samplerAnisotropy ||
 				!deviceInfo.graphicsQueueFound || !deviceInfo.transferQueueFound || !deviceInfo.presentQueueFound ||
 				!allRequiredExtensionsFound || !deviceInfo.vkSurfaceFormatsKHR.Size() || !deviceInfo.vkPresentModesKHR.Size()
 				|| !deviceInfo.vkPhysicalDeviceFeatures.fillModeNonSolid) {
@@ -282,7 +282,7 @@ namespace simple {
 			}
 		}
 
-		assert(bestPhysicalDevice.first.vkPhysicalDevice != VK_NULL_HANDLE 
+		assert(bestPhysicalDevice.first.vkPhysicalDevice != VK_NULL_HANDLE
 			&& "no suitable VkPhysicalDevice found (simple::Backend constructor)!");
 
 		_vulkanPhysicalDeviceInfo = bestPhysicalDevice.first;
@@ -290,11 +290,11 @@ namespace simple {
 		_colorMsaaSamples = _vulkanPhysicalDeviceInfo.vkPhysicalDeviceProperties.limits.sampledImageColorSampleCounts;
 		_depthMsaaSamples = _vulkanPhysicalDeviceInfo.vkPhysicalDeviceProperties.limits.sampledImageDepthSampleCounts;
 
-		simple::Array<VkDeviceQueueCreateInfo, 3> vkDeviceQueueCreateInfos{};
-		simple::Array<uint32_t, 3> queueFamilyIndices { 
-			_vulkanPhysicalDeviceInfo.graphicsQueueFamilyIndex, 
-			_vulkanPhysicalDeviceInfo.transferQueueFamilyIndex, 
-			_vulkanPhysicalDeviceInfo.presentQueueFamilyIndex, 
+		SimpleArray(VkDeviceQueueCreateInfo, 3) vkDeviceQueueCreateInfos {};
+		simple::Array<uint32_t, 3> queueFamilyIndices{
+			_vulkanPhysicalDeviceInfo.graphicsQueueFamilyIndex,
+			_vulkanPhysicalDeviceInfo.transferQueueFamilyIndex,
+			_vulkanPhysicalDeviceInfo.presentQueueFamilyIndex,
 		};
 		float queuePriority = 1.0f;
 		for (uint32_t i = 0; i < 3; i++) {
@@ -314,7 +314,7 @@ namespace simple {
 		vkPhysicalDeviceVulkan13Features.pNext = nullptr;
 		vkPhysicalDeviceVulkan13Features.dynamicRendering = VK_TRUE;
 
-		VkDeviceCreateInfo vkDeviceCreateInfo {
+		VkDeviceCreateInfo vkDeviceCreateInfo{
 			.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
 			.pNext = &vkPhysicalDeviceVulkan13Features,
 			.queueCreateInfoCount = vkDeviceQueueCreateInfos.Size(),
@@ -324,7 +324,7 @@ namespace simple {
 			.pEnabledFeatures = &vkPhysicalDeviceFeatures,
 		};
 
-		assert(Succeeded(vkCreateDevice(_vkPhysicalDevice, &vkDeviceCreateInfo, _vkAllocationCallbacks, &_vkDevice)) 
+		assert(Succeeded(vkCreateDevice(_vkPhysicalDevice, &vkDeviceCreateInfo, _vkAllocationCallbacks, &_vkDevice))
 			&& "failed to create VkDevice (function vkCreateDevice in simple::Backend constructor)!");
 
 		vkGetDeviceQueue(_vkDevice, queueFamilyIndices[0], 0, &_graphicsQueue.vkQueue);
@@ -334,7 +334,7 @@ namespace simple {
 		vkGetDeviceQueue(_vkDevice, queueFamilyIndices[2], 0, &_presentQueue.vkQueue);
 		_presentQueue.index = queueFamilyIndices[2];
 
-		VkCommandPoolCreateInfo mainGraphicsVkCommandPoolInfo {
+		VkCommandPoolCreateInfo mainGraphicsVkCommandPoolInfo{
 			.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 			.pNext = nullptr,
 			.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
@@ -348,30 +348,30 @@ namespace simple {
 			.flags = 0,
 			.queueFamilyIndex = _transferQueue.index
 		};
-		assert(Succeeded(vkCreateCommandPool(_vkDevice, &mainTransformVkCommandPoolInfo, _vkAllocationCallbacks, &_mainThread._vkTransferCommandPool))&& "failed to create vulkan transfer command pool for simple::Thread");
+		assert(Succeeded(vkCreateCommandPool(_vkDevice, &mainTransformVkCommandPoolInfo, _vkAllocationCallbacks, &_mainThread._vkTransferCommandPool)) && "failed to create vulkan transfer command pool for simple::Thread");
 
 
-		VkCommandBufferAllocateInfo vkRenderingCommandBufferAllocInfo {
+		VkCommandBufferAllocateInfo vkRenderingCommandBufferAllocInfo{
 			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
 			.pNext = nullptr,
 			.commandPool = _mainThread._vkGraphicsCommandPool,
 			.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-			.commandBufferCount = FRAMES_IN_FLIGHT,
+			.commandBufferCount = FramesInFlight,
 		};
 
 		assert(Succeeded(vkAllocateCommandBuffers(_vkDevice, &vkRenderingCommandBufferAllocInfo, _renderingVkCommandBuffers.Data())) && "failed to allocate rendering command buffers (simple::Backend constructor)!");
 
-		VkSemaphoreCreateInfo vkSemaphoreCreateInfo {
+		VkSemaphoreCreateInfo vkSemaphoreCreateInfo{
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
 			.pNext = nullptr,
 			.flags = 0
 		};
-		VkFenceCreateInfo vkFenceCreateInfo {
+		VkFenceCreateInfo vkFenceCreateInfo{
 			.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
 			.pNext = nullptr,
 			.flags = 0
 		};
-		for (size_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
+		for (size_t i = 0; i < FramesInFlight; i++) {
 			assert(
 				Succeeded(
 					vkCreateSemaphore(_vkDevice, &vkSemaphoreCreateInfo, _vkAllocationCallbacks, &_frameReadyVkSemaphores[i])
@@ -403,6 +403,13 @@ namespace simple {
 		}
 
 		_CreateSwapchain();
+
+		_depthOnlyFormat = vulkan::FindSupportedFormat(_vkPhysicalDevice, SimpleArray(VkFormat, 1) { VK_FORMAT_D32_SFLOAT }, VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+		assert(_depthOnlyFormat != VK_FORMAT_UNDEFINED && "failed to find suitable depth only format!");
+		_stencilFormat = vulkan::FindSupportedFormat(_vkPhysicalDevice, SimpleArray(VkFormat, 1) { VK_FORMAT_S8_UINT }, VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+		assert(_stencilFormat != VK_FORMAT_UNDEFINED && "failed to find suitable stencil format!");
+		_depthStencilFormat = vulkan::FindSupportedFormat(_vkPhysicalDevice, SimpleArray(VkFormat, 2) { VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT }, VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+		assert(_depthStencilFormat != VK_FORMAT_UNDEFINED && "failed to find suitable depth stencil format!");
 	}
 
 	Simple::~Simple() {
