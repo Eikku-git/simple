@@ -48,7 +48,7 @@ namespace simple {
 
 		inline Thread(Thread&& other) noexcept
 			: _stdThread(std::move(other._stdThread)), _ID(other._ID),
-				_vkGraphicsCommandPool(other._vkGraphicsCommandPool), _vkTransferCommandPool(other._vkTransferCommandPool) {
+			_vkGraphicsCommandPool(other._vkGraphicsCommandPool), _vkTransferCommandPool(other._vkTransferCommandPool) {
 			other._vkGraphicsCommandPool = VK_NULL_HANDLE;
 			other._vkTransferCommandPool = VK_NULL_HANDLE;
 		}
@@ -112,26 +112,30 @@ namespace simple {
 	class CommandBuffer {
 	public:
 
-		inline CommandBuffer(Backend& backend, ThreadCommandPool threadCommandPool, VkCommandPool vkCommandPool) noexcept 
-		: _backend(backend), _threadCommandPool(threadCommandPool), _vkCommandPool(vkCommandPool), _vkCommandBuffer(VK_NULL_HANDLE) {}
+		constexpr inline CommandBuffer(Backend& backend, ThreadCommandPool threadCommandPool, VkCommandPool vkCommandPool) noexcept
+			: _backend(backend), _threadCommandPool(threadCommandPool), _vkCommandPool(vkCommandPool), _vkCommandBuffer(VK_NULL_HANDLE) {}
 
-		void Allocate();
+		VkResult Allocate();
+
 		inline VkCommandBuffer Begin() {
 			assert(_vkCommandBuffer != VK_NULL_HANDLE
 				&& "attempting to begin a simple::CommandBuffer (function simple::CommandBuffer::Begin) when it hasn't been allocated yet");
-			VkCommandBufferBeginInfo beginInfo {
+			VkCommandBufferBeginInfo beginInfo{
 				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
 				.pNext = nullptr,
 				.flags = 0,
 				.pInheritanceInfo = nullptr
 			};
-			assert(Succeeded(vkBeginCommandBuffer(_vkCommandBuffer, &beginInfo))
-				&& "failed to begin simple::CommandBuffer (function simple::CommandBuffer::Begin)");
+			if (!Succeeded(vkBeginCommandBuffer(_vkCommandBuffer, &beginInfo))) {
+				return VK_NULL_HANDLE;
+			}
 			return _vkCommandBuffer;
 		}
-		inline void End() {
-			vkEndCommandBuffer(_vkCommandBuffer);
+
+		inline VkResult End() {
+			return vkEndCommandBuffer(_vkCommandBuffer);
 		}
+
 		void Submit();
 
 	private:
@@ -148,16 +152,16 @@ namespace simple {
 		RenderingAttachment(Field<FIFarray(VkImageView)>::Reference& imageViewsRef) noexcept : vkImageViewsRef(imageViewsRef) {}
 		RenderingAttachment(Field<FIFarray(VkImageView)>& imageViewsField) noexcept : vkImageViewsRef(imageViewsField) {}
 
-		const VkRenderingAttachmentInfo& GetInfo(uint32_t currentRenderFrame) {
+		inline VkRenderingAttachmentInfo& GetInfo(uint32_t currentRenderFrame) {
 			assert(!vkImageViewsRef.IsNull() && "vkImageViewsRef was null (function simple::RenderingAttachment::GetInfo)!");
 			vkRenderingAttachmentInfo.imageView = vkImageViewsRef.GetField().value[currentRenderFrame];
 			return vkRenderingAttachmentInfo;
 		}
 		Field<FIFarray(VkImageView)>::Reference vkImageViewsRef;
+
 	private:
-		VkRenderingAttachmentInfo vkRenderingAttachmentInfo {
-			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO
-		};
+
+		VkRenderingAttachmentInfo vkRenderingAttachmentInfo;
 	};
 
 	class RenderingContext {
@@ -286,6 +290,21 @@ namespace simple {
 			friend class Backend;
 		};
 
+	private:
+
+		RenderArea _renderArea{};
+		uint32_t _colorAttachmentCount{};
+		RenderingAttachment* _pColorAttachments{};
+		DynamicArray<VkRenderingAttachmentInfo> _vkColorAttachments{};
+		RenderingAttachment* _pDepthAttachment{};
+		RenderingAttachment* _pStencilAttachment{};
+
+		DynamicArray<Pipeline> _pipelines{};
+		Mutex _pipelinesMutex{};
+		std::atomic<uint64_t> _pipelinesUIDState;
+
+	public:
+
 		template<uint32_t T_color_attachment_count>
 		void Init(const SimpleArray(RenderingAttachment, T_color_attachment_count)* colorAttachments, 
 			RenderingAttachment* pDepthAttachment, RenderingAttachment* pStencilAttachment) {
@@ -323,19 +342,6 @@ namespace simple {
 			return _vkColorAttachments.Data();
 		}
 
-	private:
-
-		RenderArea _renderArea{};
-		uint32_t _colorAttachmentCount{};
-		RenderingAttachment* _pColorAttachments{};
-		DynamicArray<VkRenderingAttachmentInfo> _vkColorAttachments{};
-		RenderingAttachment* _pDepthAttachment{};
-		RenderingAttachment* _pStencilAttachment{};
-
-		DynamicArray<Pipeline> _pipelines{};
-		Mutex _pipelinesMutex{};
-		std::atomic<uint64_t> _pipelinesUIDState;
-
 		friend class Backend;
 	};
 
@@ -369,6 +375,10 @@ namespace simple {
 
 		constexpr inline ImageExtent GetSwapchainImageExtent() const {
 			return ImageExtent(_swapchainVkExtent2D.width, _swapchainVkExtent2D.height, 1);
+		}
+
+		constexpr inline Extent2D GetSwapchainExtent() const {
+			return _swapchainVkExtent2D;
 		}
 
 		constexpr inline const FIFarray(VkImageView)& GetSwapchainImageViews() const {
@@ -831,8 +841,6 @@ namespace simple {
 	class Image {
 	public:
 
-		static constexpr inline VkComponentSwizzle component_swizzle_identity = VK_COMPONENT_SWIZZLE_IDENTITY;
-
 		inline Image() noexcept : _pEngine(nullptr) {}
 
 		inline Image(Simple& pEngine) noexcept : _pEngine(&pEngine) {}
@@ -953,8 +961,37 @@ namespace simple {
 			return VK_SUCCESS;
 		}
 
-		inline bool TransitionLayout(ImageLayout) {
+		inline bool TransitionLayout(ImageLayout newLayout, const ImageSubResourceRange& subResourceRange) noexcept {
+			const VkPipelineStageFlagBits srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			const VkPipelineStageFlagBits dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 			const Thread* thread = _pEngine->_backend.GetThisThread();
+			CommandBuffer commandBuffer = _pEngine->_backend.GetNewGraphicsCommandBuffer(*thread);
+			if (!Succeeded(commandBuffer.Allocate())) {
+				logError(this, "failed to allocate command buffers (function vkAllocateCommandBuffers in function simple::Image::TransitionLayout)!");
+				return false;
+			}
+			VkCommandBuffer vkCommandBuffer = commandBuffer.Begin();
+			if (vkCommandBuffer == VK_NULL_HANDLE) {
+				logError(this, "failed to begin command buffer (function simple::CommandBuffer::Begin in function simple::Image::TransitionLayout)!");
+				return false;
+			}
+			VkImageMemoryBarrier vkMemoryBarrier {
+				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+				.pNext = nullptr,
+				.srcAccessMask = 0,
+				.dstAccessMask = 0,
+				.oldLayout = _layout,
+				.newLayout = newLayout,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.image = _vkImage,
+				.subresourceRange = subResourceRange
+			};
+			vkCmdPipelineBarrier(vkCommandBuffer, srcStageMask, dstStageMask, 0, 0, nullptr, 0, nullptr, 1, &vkMemoryBarrier);
+			commandBuffer.End();
+			commandBuffer.Submit();
+			_layout = newLayout;
+			return true;
 		}
 
 		void Terminate() noexcept {
