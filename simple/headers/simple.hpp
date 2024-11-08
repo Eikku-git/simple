@@ -377,7 +377,7 @@ namespace simple {
 			return ImageExtent(_swapchainVkExtent2D.width, _swapchainVkExtent2D.height, 1);
 		}
 
-		constexpr inline Extent2D GetSwapchainExtent() const {
+		constexpr inline const Extent2D& GetSwapchainExtent() const {
 			return _swapchainVkExtent2D;
 		}
 
