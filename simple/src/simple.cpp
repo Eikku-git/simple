@@ -10,7 +10,7 @@
 
 namespace simple {
 
-	void simple::CommandBuffer::Allocate() {
+	VkResult simple::CommandBuffer::Allocate() {
 		assert(_vkCommandBuffer == VK_NULL_HANDLE && "attempting to allocate simple::CommandBuffer that's already allocated!");
 		VkCommandBufferAllocateInfo allocInfo {
 			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -19,8 +19,7 @@ namespace simple {
 			.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
 			.commandBufferCount = 1
 		};
-		assert(Succeeded(vkAllocateCommandBuffers(_backend._vkDevice, &allocInfo, &_vkCommandBuffer))
-			&& "failed to allocate command buffer (function simple::CommandBuffer::Allocate)");
+		return vkAllocateCommandBuffers(_backend._vkDevice, &allocInfo, &_vkCommandBuffer);
 	}
 
 	void simple::CommandBuffer::Submit() {
