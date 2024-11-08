@@ -21,42 +21,44 @@ namespace simple {
 	class Backend;
 	typedef uint32_t Flags;
 
-	enum ImageSampleBits {
-		ImageSample_1Bit = VK_SAMPLE_COUNT_1_BIT,
-		ImageSample_2Bit = VK_SAMPLE_COUNT_2_BIT,
-		ImageSample_4Bit = VK_SAMPLE_COUNT_4_BIT,
-		ImageSample_8Bit = VK_SAMPLE_COUNT_8_BIT,
-		ImageSample_16Bit = VK_SAMPLE_COUNT_16_BIT,
-		ImageSample_32Bit = VK_SAMPLE_COUNT_32_BIT,
-		ImageSample_64Bit = VK_SAMPLE_COUNT_64_BIT,
-	};
-
+	typedef VkSampleCountFlagBits ImageSampleBits;
 	typedef VkFormat ImageFormat;
 	typedef Flags ImageSamples;
 	typedef VkExtent3D ImageExtent;
+	typedef VkExtent2D Extent2D;
+	typedef VkRect2D RenderArea;
+	typedef Flags ImageUsageFlags;
+	typedef Flags ImageAspectFlags;
+	typedef VkImageTiling ImageTiling;
+	typedef VkImageType ImageType;
+	typedef VkImageViewType ImageViewType;
+	typedef VkImageLayout ImageLayout;
+	typedef VkImageSubresourceRange ImageSubResourceRange;
+	typedef VkComponentMapping ImageComponentMapping;
 
-	static inline bool Succeeded(VkResult vkResult) {
-		return vkResult == VK_SUCCESS;
-	}
+	typedef std::mutex Mutex;
+	typedef std::lock_guard<Mutex> LockGuard;
 
 	class Thread {
 	public:
 
+		typedef std::thread::id ID;
+
 		Thread() noexcept : _stdThread(std::thread{}) {}
 
 		inline Thread(Thread&& other) noexcept
-			: _stdThread(std::move(other._stdThread)), _stdThreadID(other._stdThreadID),
+			: _stdThread(std::move(other._stdThread)), _ID(other._ID),
 				_vkGraphicsCommandPool(other._vkGraphicsCommandPool), _vkTransferCommandPool(other._vkTransferCommandPool) {
 			other._vkGraphicsCommandPool = VK_NULL_HANDLE;
 			other._vkTransferCommandPool = VK_NULL_HANDLE;
 		}
 
 		inline Thread(std::thread&& thread) : _stdThread(std::move(thread)) {
-			_stdThreadID = _stdThread.get_id();
+			_ID = _stdThread.get_id();
 		}
 
-		inline std::thread::id GetID() const {
-			return _stdThreadID;
+		inline ID GetID() const {
+			return _ID;
 		}
 
 		inline VkCommandPool GetGraphicsCommandPool() const {
@@ -68,13 +70,13 @@ namespace simple {
 		}
 
 		inline bool operator==(const Thread& other) const {
-			return _stdThreadID == other._stdThreadID;
+			return _ID == other._ID;
 		}
 
 		struct Hash {
 
 			inline size_t operator()(const Thread& thread) {
-				return std::hash<std::thread::id>()(thread._stdThreadID);
+				return std::hash<std::thread::id>()(thread._ID);
 			}
 
 			inline size_t operator()(std::thread::id thread) {
@@ -84,7 +86,7 @@ namespace simple {
 
 	private:
 
-		std::thread::id _stdThreadID{};
+		ID _ID{};
 		std::thread _stdThread;
 		VkCommandPool _vkGraphicsCommandPool{};
 		VkCommandPool _vkTransferCommandPool{};
@@ -102,6 +104,10 @@ namespace simple {
 		Graphics = 1,
 		Transfer = 2,
 	};
+
+	static inline bool Succeeded(VkResult vkResult) {
+		return vkResult == VK_SUCCESS;
+	}
 
 	class CommandBuffer {
 	public:
@@ -134,8 +140,6 @@ namespace simple {
 		VkCommandPool _vkCommandPool;
 		VkCommandBuffer _vkCommandBuffer;
 	};
-
-	typedef VkRect2D RenderArea;
 
 	struct RenderingAttachment {
 	public:
@@ -196,7 +200,7 @@ namespace simple {
 			inline ShaderObject(ShaderObject&& other) noexcept 
 				: _reference(other._reference), _UID(other._UID), _vkDescriptorSetCount(other._vkDescriptorSetCount), _vkDescriptorSets(other._vkDescriptorSets),
 					_meshUIDState() {
-				std::lock_guard<std::mutex> lock(other._meshesMutex);
+				LockGuard lockGuard(other._meshesMutex);
 				_meshUIDState = other._meshUIDState.load();
 				new(&_meshes) DynamicArray<Mesh>(std::move(other._meshes));
 				*_reference = this;
@@ -206,12 +210,12 @@ namespace simple {
 
 			template<uint32_t T_vertex_buffer_count>
 			inline const Mesh* AddMesh(Mesh** meshReference, VkBuffer vertexBuffers[T_vertex_buffer_count], VkDeviceSize vertexBufferOffsets[T_vertex_buffer_count], VkBuffer indexBuffer) noexcept {
-				std::lock_guard<std::mutex> lock(_meshesMutex);
+				LockGuard lockGuard(_meshesMutex);
 				return &_meshes.EmplaceBack(meshReference, UID::Shuffle(_meshUIDState), T_vertex_buffer_count, vertexBuffers, vertexBufferOffsets, indexBuffer);
 			}
 
 			inline bool RemoveMesh(const Mesh& mesh) {
-				std::lock_guard<std::mutex> lock(_meshesMutex);
+				LockGuard lockGuard(_meshesMutex);
 				auto iter = _meshes.Find(mesh);
 				if (iter == _meshes.end()) {
 					logError(this, "failed to remove mesh (function simple::RenderingContext::ShaderObject::RemoveMesh), may indicate invalid simple::RenderingContext::Mesh handle");
@@ -235,7 +239,7 @@ namespace simple {
 			uint32_t _vkDescriptorSetCount;
 			VkDescriptorSet* _vkDescriptorSets;
 			DynamicArray<Mesh> _meshes{};
-			std::mutex _meshesMutex{};
+			Mutex _meshesMutex{};
 			std::atomic<uint64_t> _meshUIDState;
 
 			friend class Backend;
@@ -250,7 +254,7 @@ namespace simple {
 			inline Pipeline(Pipeline&& other) noexcept 
 				: _reference(other._reference), _UID(other._UID), _vkPipeline(other._vkPipeline), _vkPipelineLayout(other._vkPipelineLayout),
 					_shaderObjectsUIDState() {
-				std::lock_guard<std::mutex> lock(other._shaderObjectsMutex);
+				LockGuard lockGuard(other._shaderObjectsMutex);
 				_shaderObjectsUIDState = other._shaderObjectsUIDState.load();
 				new(&_shaderObjects) DynamicArray<ShaderObject>(std::move(other._shaderObjects));
 				*_reference = this;
@@ -260,7 +264,7 @@ namespace simple {
 
 			template<uint32_t T_descriptor_set_count>
 			inline const ShaderObject* AddShaderObject(ShaderObject** shaderObjectReference, VkDescriptorSet vkDescriptorSets[T_descriptor_set_count]) {
-				std::lock_guard<std::mutex> lock(_shaderObjectsMutex);
+				LockGuard lockGuard(_shaderObjectsMutex);
 				return *_shaderObjects.EmplaceBack(shaderObjectReference, UID::Shuffle(_shaderObjectsUIDState), T_descriptor_set_count, vkDescriptorSets);
 			}
 
@@ -276,29 +280,29 @@ namespace simple {
 			VkPipelineLayout _vkPipelineLayout;
 
 			DynamicArray<ShaderObject> _shaderObjects{};
-			std::mutex _shaderObjectsMutex{};
+			Mutex _shaderObjectsMutex{};
 			std::atomic<uint64_t> _shaderObjectsUIDState;
 
 			friend class Backend;
 		};
 
 		template<uint32_t T_color_attachment_count>
-		void Init(RenderingAttachment colorAttachments[T_color_attachment_count], 
+		void Init(const SimpleArray(RenderingAttachment, T_color_attachment_count)* colorAttachments, 
 			RenderingAttachment* pDepthAttachment, RenderingAttachment* pStencilAttachment) {
 			_colorAttachmentCount = T_color_attachment_count;
-			_pColorAttachments = colorAttachments;
+			_pColorAttachments = colorAttachments ? colorAttachments->Data() : nullptr;
 			_vkColorAttachments.Resize(T_color_attachment_count);
 			_pDepthAttachment = pDepthAttachment;
 			_pStencilAttachment = pStencilAttachment;
 		}
 
 		inline const Pipeline* AddPipeline(Pipeline** pipelineReference, VkPipeline vkPipeline, VkPipelineLayout vkPipelineLayout) {
-			std::lock_guard<std::mutex> lock(_pipelinesMutex);
+			LockGuard lockGuard(_pipelinesMutex);
 			return &_pipelines.EmplaceBack(pipelineReference, UID::Shuffle(_pipelinesUIDState), vkPipeline, vkPipelineLayout);
 		}
 
 		inline bool RemovePipeline(const Pipeline& pipeline) noexcept {
-			std::lock_guard<std::mutex> lock(_pipelinesMutex);
+			LockGuard lockGuard(_pipelinesMutex);
 			auto iter = _pipelines.Find(pipeline);
 			if (iter == _pipelines.end()) {
 				logError(this, "failed to remove mesh (function simple::RenderingContext::ShaderObject::RemoveMesh), may indicate invalid simple::RenderingContext::Mesh handle");
@@ -329,7 +333,7 @@ namespace simple {
 		RenderingAttachment* _pStencilAttachment{};
 
 		DynamicArray<Pipeline> _pipelines{};
-		std::mutex _pipelinesMutex{};
+		Mutex _pipelinesMutex{};
 		std::atomic<uint64_t> _pipelinesUIDState;
 
 		friend class Backend;
@@ -351,11 +355,11 @@ namespace simple {
 		}
 
 		inline const Thread* GetThisThread() {
-			std::thread::id threadID = std::this_thread::get_id();
-			if (threadID == _mainThread._stdThreadID) {
+			Thread::ID threadID = std::this_thread::get_id();
+			if (threadID == _mainThread._ID) {
 				return &_mainThread;
 			}
-			std::lock_guard<std::mutex> lock(_threadsMutex);
+			LockGuard lockGuard(_threadsMutex);
 			auto pair = _threads.Find(threadID);
 			if (pair) {
 				return &pair->second;
@@ -387,8 +391,17 @@ namespace simple {
 			return _depthStencilFormat;
 		}
 
+		inline bool PushRenderingContextToRendering(RenderingContext* pRenderingContext) {
+			LockGuard lockGuard(_activeRenderingContextsMutex);
+			if (Backend::max_active_rendering_context_count <= _activeRenderingContextCount) {
+				return false;
+			}
+			_activeRenderingContexts[_activeRenderingContextCount++] = pRenderingContext;
+			return true;
+		}
+
 		inline bool ThreadExists(std::thread& thread) {
-			std::lock_guard<std::mutex> lock(_threadsMutex);
+			LockGuard lockGuard(_threadsMutex);
 			return _threads.Contains(thread.get_id());
 		}
 
@@ -404,11 +417,11 @@ namespace simple {
 
 		Simple& _engine;
 		VkAllocationCallbacks* _vkAllocationCallbacks = VK_NULL_HANDLE;
-		Map<std::thread::id, Thread, Thread::Hash> _threads{};
-		std::mutex _threadsMutex{};
+		Map<Thread::ID, Thread, Thread::Hash> _threads{};
+		Mutex _threadsMutex{};
 		Thread _mainThread{};
 		DynamicArray<VkCommandBuffer> _queuedGraphicsCommandBuffers{};
-		std::mutex _queuedGraphicsCommandBuffersMutex{};
+		Mutex _queuedGraphicsCommandBuffersMutex{};
 		VkInstance _vkInstance{};
 		VkPhysicalDevice _vkPhysicalDevice{};
 		vulkan::PhysicalDeviceInfo _vulkanPhysicalDeviceInfo;
@@ -435,18 +448,18 @@ namespace simple {
 
 		std::atomic<uint32_t> _activeRenderingContextCount{};
 		SimpleArray(RenderingContext*, max_active_rendering_context_count) _activeRenderingContexts{};
-		std::mutex _activeRenderingContextsMutex{};
+		Mutex _activeRenderingContextsMutex{};
 
 		DynamicArray<Pair<SwapchainRecreateCallback, Field<void*>::Reference>> _swapchainRecreateCallbacks{};
-		std::mutex _swapchainRecreateCallbacksMutex{};
+		Mutex _swapchainRecreateCallbacksMutex{};
 
 		uint32_t _currentRenderFrame{};
 
 		inline Thread* _NewThread(std::thread&& thread) {
 
-			std::lock_guard<std::mutex> lock(_threadsMutex);
+			LockGuard lockGuard(_threadsMutex);
 
-			std::thread::id threadID = thread.get_id();
+			Thread::ID threadID = thread.get_id();
 
 			assert(!_threads.Contains(threadID) && "attempting to create simple::Thread when the thread already exists!");
 
@@ -472,12 +485,12 @@ namespace simple {
 		}
 
 		inline void _QueueGraphicsCommandBuffer(VkCommandBuffer commandBuffer) {
-			std::lock_guard<std::mutex> lock(_queuedGraphicsCommandBuffersMutex);
+			LockGuard lockGuard(_queuedGraphicsCommandBuffersMutex);
 			_queuedGraphicsCommandBuffers.PushBack(commandBuffer);
 		}
 
 		inline simple::DynamicArray<VkCommandBuffer>&& _MoveGraphicsCommandBuffers() {
-			std::lock_guard<std::mutex> lock(_queuedGraphicsCommandBuffersMutex);
+			LockGuard lockGuard(_queuedGraphicsCommandBuffersMutex);
 			return std::move(_queuedGraphicsCommandBuffers);
 		}
 
@@ -502,7 +515,7 @@ namespace simple {
 
 		inline void _AddSwapchainRecreateCallback(SwapchainRecreateCallback callback, simple::Field<void*>& caller) {
 			assert(callback && "attempting to add swapchain recreate callback (function simple::Backend::_AddSwapchainRecreateCallback) with a function that's null!");
-			std::lock_guard<std::mutex> lock(_swapchainRecreateCallbacksMutex);
+			LockGuard lockGuard(_swapchainRecreateCallbacksMutex);
 			_swapchainRecreateCallbacks.EmplaceBack(callback, caller);
 		}
 
@@ -584,7 +597,7 @@ namespace simple {
 			vkCmdBeginRendering(renderCommandBuffer, &swapchainClearRenderingInfo);
 			vkCmdEndRendering(renderCommandBuffer);
 
-			std::lock_guard<std::mutex> activeRenderingContextsLock(_activeRenderingContextsMutex);
+			LockGuard activeRenderingContextsLock(_activeRenderingContextsMutex);
 			for (uint32_t i = 0; i < _activeRenderingContextCount; i++) {
 				RenderingContext* context = _activeRenderingContexts[i];
 				VkRenderingInfo vkRenderingInfo {
@@ -596,8 +609,8 @@ namespace simple {
 					.viewMask = 0,
 					.colorAttachmentCount = context->_colorAttachmentCount,
 					.pColorAttachments = context->GetColorAttachments(_currentRenderFrame),
-					.pDepthAttachment = &context->_pDepthAttachment->GetInfo(_currentRenderFrame),
-					.pStencilAttachment = &context->_pStencilAttachment->GetInfo(_currentRenderFrame),
+					.pDepthAttachment = context->_pDepthAttachment ? &context->_pDepthAttachment->GetInfo(_currentRenderFrame) : nullptr,
+					.pStencilAttachment = context->_pStencilAttachment ? &context->_pStencilAttachment->GetInfo(_currentRenderFrame) : nullptr,
 				};
 				vkCmdBeginRendering(renderCommandBuffer, &vkRenderingInfo);
 				for (RenderingContext::Pipeline& pipeline : _activeRenderingContexts[i]->_pipelines) {
@@ -614,6 +627,8 @@ namespace simple {
 				vkCmdEndRendering(renderCommandBuffer);
 				_activeRenderingContexts[i] = nullptr;
 			}
+
+			_activeRenderingContextCount = 0;
 
 			VkImageMemoryBarrier finalSwapchainMemoryBarrier {
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -720,7 +735,7 @@ namespace simple {
 
 		inline void _Terminate() {
 			vkDeviceWaitIdle(_vkDevice);
-			std::lock_guard<std::mutex> lock(_threadsMutex);
+			LockGuard lockGuard(_threadsMutex);
 			vkDestroyCommandPool(_vkDevice, _mainThread._vkGraphicsCommandPool, _vkAllocationCallbacks);
 			vkDestroyCommandPool(_vkDevice, _mainThread._vkTransferCommandPool, _vkAllocationCallbacks);
 			for (auto& pair : _threads) {
@@ -769,15 +784,6 @@ namespace simple {
 			return _backend;
 		}
 
-		inline bool PushRenderingContext(RenderingContext* pRenderingContext) {
-			std::lock_guard<std::mutex> lock(_backend._activeRenderingContextsMutex);
-			if (Backend::max_active_rendering_context_count <= _backend._activeRenderingContextCount) {
-				return false;
-			}
-			_backend._activeRenderingContexts[_backend._activeRenderingContextCount++] = pRenderingContext;
-			return true;
-		}
-
 		inline bool Quitting() {
 			WindowSystem::PollEvents();
 			return glfwWindowShouldClose(_window.GetRawPointer());
@@ -792,8 +798,9 @@ namespace simple {
 			return true;
 		}
 
-		inline void DestroyVkImageView(VkImageView vkImageView) {
+		inline void DestroyVkImageView(VkImageView& vkImageView) {
 			vkDestroyImageView(_backend._vkDevice, vkImageView, _backend._vkAllocationCallbacks);
+			vkImageView = nullptr;
 		}
 
 #ifdef EDITOR
@@ -820,45 +827,7 @@ namespace simple {
 		friend class Image;
 		friend class ImageView;
 	};
-	
-	typedef Flags ImageUsageFlags;
-	typedef Flags ImageAspectFlags;
-
-	enum class ImageTiling {
-		Optimal = VK_IMAGE_TILING_OPTIMAL,
-		Linear = VK_IMAGE_TILING_LINEAR,
-	};
-
-	enum class ImageType {
-		OneD = VK_IMAGE_TYPE_1D,
-		TwoD = VK_IMAGE_TYPE_2D,
-		ThreeD = VK_IMAGE_TYPE_3D,
-	};
-
-	enum class ImageLayout {
-		Undefined = VK_IMAGE_LAYOUT_UNDEFINED,
-		General = VK_IMAGE_LAYOUT_GENERAL,
-		ColorAttachmentOptimal = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-		DepthStencilAttachmentOptimal = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-		DepthStencilReadOnlyOptimal = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-		ShaderReadOnlyOptimal = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-		TransferSrcOptimal = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-		TransferDstOptimal = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-	};
-
-	typedef VkImageSubresourceRange ImageSubResourceRange;
-	typedef VkComponentMapping ImageComponentMapping;
-
-	enum class ImageViewType {
-		OneD = VK_IMAGE_VIEW_TYPE_1D,
-		TwoD = VK_IMAGE_VIEW_TYPE_2D,
-		ThreeD = VK_IMAGE_VIEW_TYPE_3D,
-		Cube = VK_IMAGE_VIEW_TYPE_CUBE,
-		OneDArray = VK_IMAGE_VIEW_TYPE_1D_ARRAY,
-		TwoDArray = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-		CubeArray = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY,
-	};
-
+		
 	class Image {
 	public:
 
@@ -879,9 +848,9 @@ namespace simple {
 		}
 
 		inline bool CreateImage(ImageExtent extent, ImageFormat format, ImageUsageFlags usage, uint32_t mipLevels = 1,
-			uint32_t arrayLayers = 1, ImageSampleBits samples = ImageSample_1Bit, 
-			ImageTiling tiling = ImageTiling::Optimal, 
-			ImageType type = ImageType::TwoD) noexcept {
+			uint32_t arrayLayers = 1, ImageSampleBits samples = VK_SAMPLE_COUNT_1_BIT, 
+			ImageTiling tiling = ImageTiling::VK_IMAGE_TILING_OPTIMAL, 
+			ImageType type = ImageType::VK_IMAGE_TYPE_2D) noexcept {
 			if (!IsNull()) {
 				logError(this, "attempting to create image (function simple::Image::CreateImage) when an image is already created and not terminated!");
 				return false;
@@ -951,7 +920,7 @@ namespace simple {
 			return VK_SUCCESS;
 		}
 
-		inline VkImageView CreateVkImageView(const ImageSubResourceRange& subresourceRange, ImageViewType viewType = ImageViewType::TwoD, const ImageComponentMapping& components = {}) const noexcept {
+		inline VkImageView CreateVkImageView(const ImageSubResourceRange& subresourceRange, ImageViewType viewType = ImageViewType::VK_IMAGE_VIEW_TYPE_2D, const ImageComponentMapping& components = {}) const noexcept {
 			if (IsNull()) {
 				logError(this, "attempting to create VkImageView with simple::Image that's null!");
 				return VK_NULL_HANDLE;
@@ -984,12 +953,16 @@ namespace simple {
 			return VK_SUCCESS;
 		}
 
+		inline bool TransitionLayout(ImageLayout) {
+			const Thread* thread = _pEngine->_backend.GetThisThread();
+		}
+
 		void Terminate() noexcept {
 			vkFreeMemory(_pEngine->_backend._vkDevice, _vkDeviceMemory, _pEngine->_backend._vkAllocationCallbacks);
 			_vkDeviceMemory = VK_NULL_HANDLE;
 			vkDestroyImage(_pEngine->_backend._vkDevice, _vkImage, _pEngine->_backend._vkAllocationCallbacks);
 			_vkImage = VK_NULL_HANDLE;
-			_layout = ImageLayout::Undefined;
+			_layout = ImageLayout::VK_IMAGE_LAYOUT_UNDEFINED;
 			_extent = { 0, 0, 0 };
 			_arrayLayers = 0;
 			_format = ImageFormat::VK_FORMAT_UNDEFINED;
