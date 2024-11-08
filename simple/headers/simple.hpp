@@ -1,20 +1,16 @@
 #pragma once
 
-#include "simple.hpp"
+#include "simple_macros.hpp"
 #include "simple_algorithm.hpp"
 #include "simple_dynamic_array.hpp"
-#include "vulkan/vulkan_core.h"
-#ifdef FRAMES_IN_FLIGHT
-#else
-#define FRAMES_IN_FLIGHT 2U
-#endif
 #include "simple_window.hpp"
 #include "simple_logging.hpp"
 #include "simple_array.hpp"
 #include "simple_set.hpp"
 #include "simple_map.hpp"
 #include "simple_UID.hpp"
-#include "vulkan/vulkan.h"
+#include "simple_field.hpp"
+#include "simple_vulkan.hpp"
 #include <assert.h>
 #include <thread>
 #include <mutex>
@@ -35,92 +31,12 @@ namespace simple {
 		ImageSample_64Bit = VK_SAMPLE_COUNT_64_BIT,
 	};
 
-	enum class ImageFormat {
-		Undefined = VK_FORMAT_UNDEFINED,
-		R8G8B8A8_SRGB = VK_FORMAT_R8G8B8A8_SRGB,
-		B8G8R8A8_SRGB = VK_FORMAT_B8G8R8A8_SRGB,
-	};
-
+	typedef VkFormat ImageFormat;
 	typedef Flags ImageSamples;
+	typedef VkExtent3D ImageExtent;
 
 	static inline bool Succeeded(VkResult vkResult) {
 		return vkResult == VK_SUCCESS;
-	}
-
-	namespace vulkan {
-
-		struct PhysicalDeviceInfo {
-			VkPhysicalDevice vkPhysicalDevice;
-			VkSurfaceKHR vkSurfaceKHR;
-			VkPhysicalDeviceFeatures vkPhysicalDeviceFeatures;
-			VkPhysicalDeviceProperties vkPhysicalDeviceProperties;
-			DynamicArray<VkExtensionProperties> vkExtensionProperties{};
-			DynamicArray<VkQueueFamilyProperties> vkQueueFamilyProperties{};
-			uint32_t graphicsQueueFamilyIndex{}, transferQueueFamilyIndex{}, presentQueueFamilyIndex{};
-			bool graphicsQueueFound{}, transferQueueFound{}, presentQueueFound{};
-			VkSurfaceCapabilitiesKHR vkSurfaceCapabilitiesKHR;
-			DynamicArray<VkSurfaceFormatKHR> vkSurfaceFormatsKHR{};
-			DynamicArray<VkPresentModeKHR> vkPresentModesKHR{};
-
-			inline PhysicalDeviceInfo() {}
-
-			inline PhysicalDeviceInfo(VkPhysicalDevice vkPhysicalDevice, VkSurfaceKHR vkSurfaceKHR) noexcept
-			: vkPhysicalDevice(vkPhysicalDevice), vkSurfaceKHR(vkSurfaceKHR) {
-
-				vkGetPhysicalDeviceFeatures(vkPhysicalDevice, &vkPhysicalDeviceFeatures);
-				vkGetPhysicalDeviceProperties(vkPhysicalDevice, &vkPhysicalDeviceProperties);
-
-				uint32_t vkExtensionPropertiesCount;
-				vkEnumerateDeviceExtensionProperties(vkPhysicalDevice, nullptr, &vkExtensionPropertiesCount, nullptr);
-				vkExtensionProperties.Resize(vkExtensionPropertiesCount);
-				vkEnumerateDeviceExtensionProperties(vkPhysicalDevice, nullptr, &vkExtensionPropertiesCount, vkExtensionProperties.Data());
-
-				uint32_t vkQueueFamilyPropertiesCount;
-				vkGetPhysicalDeviceQueueFamilyProperties(vkPhysicalDevice, &vkQueueFamilyPropertiesCount, nullptr);
-				vkQueueFamilyProperties.Resize(vkQueueFamilyPropertiesCount);
-				vkGetPhysicalDeviceQueueFamilyProperties(vkPhysicalDevice, &vkQueueFamilyPropertiesCount, vkQueueFamilyProperties.Data());
-
-				vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vkPhysicalDevice, vkSurfaceKHR, &vkSurfaceCapabilitiesKHR);
-
-				uint32_t vkSurfaceFormatsCount;
-				vkGetPhysicalDeviceSurfaceFormatsKHR(vkPhysicalDevice, vkSurfaceKHR, &vkSurfaceFormatsCount, nullptr);
-				vkSurfaceFormatsKHR.Resize(vkSurfaceFormatsCount);
-				vkGetPhysicalDeviceSurfaceFormatsKHR(vkPhysicalDevice, vkSurfaceKHR, &vkSurfaceFormatsCount, vkSurfaceFormatsKHR.Data());
-
-				uint32_t vkPresentModesCount;
-				vkGetPhysicalDeviceSurfacePresentModesKHR(vkPhysicalDevice, vkSurfaceKHR, &vkPresentModesCount, nullptr);
-				vkPresentModesKHR.Resize(vkPresentModesCount);
-				vkGetPhysicalDeviceSurfacePresentModesKHR(vkPhysicalDevice, vkSurfaceKHR, &vkPresentModesCount, vkPresentModesKHR.Data());
-
-				uint32_t queueFamilyIndex = 0;
-				for (const VkQueueFamilyProperties& properties : vkQueueFamilyProperties) {
-					bool transferOrGraphicsQueueFound = false;
-					if (!transferQueueFound && properties.queueFlags & VK_QUEUE_TRANSFER_BIT
-						&& (graphicsQueueFound || !(properties.queueFlags & VK_QUEUE_GRAPHICS_BIT))) {
-						transferQueueFamilyIndex = queueFamilyIndex;
-						transferQueueFound = true;
-						transferOrGraphicsQueueFound = true;
-					}
-					if (!transferOrGraphicsQueueFound && !graphicsQueueFound && properties.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-						graphicsQueueFamilyIndex = queueFamilyIndex;
-						graphicsQueueFound = true;
-						transferOrGraphicsQueueFound = true;
-					}
-					if (!transferOrGraphicsQueueFound && !presentQueueFound) {
-						VkBool32 presentSupported{};
-						vkGetPhysicalDeviceSurfaceSupportKHR(vkPhysicalDevice, queueFamilyIndex, vkSurfaceKHR, &presentSupported);
-						if (presentSupported) {
-							presentQueueFamilyIndex = queueFamilyIndex;
-							presentQueueFound = true;
-						}
-					}
-					if (graphicsQueueFound && transferQueueFound && presentQueueFound) {
-						break;
-					}
-					++queueFamilyIndex;
-				}
-			}
-		};
 	}
 
 	class Thread {
@@ -223,10 +139,17 @@ namespace simple {
 
 	struct RenderingAttachment {
 	public:
-		const VkRenderingAttachmentInfo& GetInfo() {
-			return vkRenderingAttachmentInfo; 
+
+		RenderingAttachment() noexcept : vkImageViewsRef() {}
+		RenderingAttachment(Field<FIFarray(VkImageView)>::Reference& imageViewsRef) noexcept : vkImageViewsRef(imageViewsRef) {}
+		RenderingAttachment(Field<FIFarray(VkImageView)>& imageViewsField) noexcept : vkImageViewsRef(imageViewsField) {}
+
+		const VkRenderingAttachmentInfo& GetInfo(uint32_t currentRenderFrame) {
+			assert(!vkImageViewsRef.IsNull() && "vkImageViewsRef was null (function simple::RenderingAttachment::GetInfo)!");
+			vkRenderingAttachmentInfo.imageView = vkImageViewsRef.GetField().value[currentRenderFrame];
+			return vkRenderingAttachmentInfo;
 		}
-		simple::Array<VkImageView, FRAMES_IN_FLIGHT> vkImageViews;
+		Field<FIFarray(VkImageView)>::Reference vkImageViewsRef;
 	private:
 		VkRenderingAttachmentInfo vkRenderingAttachmentInfo {
 			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO
@@ -307,6 +230,7 @@ namespace simple {
 		private:
 
 			ShaderObject** _reference;
+			VkClearValue clearValue{};
 			uint64_t _UID;
 			uint32_t _vkDescriptorSetCount;
 			VkDescriptorSet* _vkDescriptorSets;
@@ -359,9 +283,11 @@ namespace simple {
 		};
 
 		template<uint32_t T_color_attachment_count>
-		void Initialize(RenderingAttachment colorAttachments[T_color_attachment_count], 
+		void Init(RenderingAttachment colorAttachments[T_color_attachment_count], 
 			RenderingAttachment* pDepthAttachment, RenderingAttachment* pStencilAttachment) {
 			_colorAttachmentCount = T_color_attachment_count;
+			_pColorAttachments = colorAttachments;
+			_vkColorAttachments.Resize(T_color_attachment_count);
 			_pDepthAttachment = pDepthAttachment;
 			_pStencilAttachment = pStencilAttachment;
 		}
@@ -386,11 +312,19 @@ namespace simple {
 			_renderArea = renderArea;
 		}
 
+		inline VkRenderingAttachmentInfo* GetColorAttachments(uint32_t currentRenderFrame) {
+			for (uint32_t i = 0; i < _colorAttachmentCount; i++) {
+				_vkColorAttachments[i] = _pColorAttachments[i].GetInfo(currentRenderFrame);
+			}
+			return _vkColorAttachments.Data();
+		}
+
 	private:
 
 		RenderArea _renderArea{};
 		uint32_t _colorAttachmentCount{};
 		RenderingAttachment* _pColorAttachments{};
+		DynamicArray<VkRenderingAttachmentInfo> _vkColorAttachments{};
 		RenderingAttachment* _pDepthAttachment{};
 		RenderingAttachment* _pStencilAttachment{};
 
@@ -401,6 +335,8 @@ namespace simple {
 		friend class Backend;
 	};
 
+	typedef void (*SwapchainRecreateCallback)(Field<void*>& field, uint32_t width, uint32_t height, const FIFarray(VkImageView)& swapchainViews);
+
 	class Backend {
 	public:
 
@@ -410,7 +346,7 @@ namespace simple {
 
 		Backend(Simple& engine);
 
-		inline const Thread& GetMainThread() const {
+		constexpr inline const Thread& GetMainThread() const {
 			return _mainThread;
 		}
 
@@ -425,6 +361,30 @@ namespace simple {
 				return &pair->second;
 			}
 			return nullptr;
+		}
+
+		constexpr inline ImageExtent GetSwapchainImageExtent() const {
+			return ImageExtent(_swapchainVkExtent2D.width, _swapchainVkExtent2D.height, 1);
+		}
+
+		constexpr inline const FIFarray(VkImageView)& GetSwapchainImageViews() const {
+			return _swapchainImageViews;
+		}
+
+		constexpr inline ImageFormat GetSwapchainImageFormat() const {
+			return (ImageFormat)_vkSurfaceFormatKHR.format;
+		}
+		
+		constexpr inline ImageFormat GetDepthOnlyImageFormat() const {
+			return _depthOnlyFormat;
+		}
+
+		constexpr inline ImageFormat GetStencilImageFormat() const {
+			return _stencilFormat;
+		}
+
+		constexpr inline ImageFormat GetDepthStencilImageFormat() const {
+			return _depthStencilFormat;
 		}
 
 		inline bool ThreadExists(std::thread& thread) {
@@ -459,20 +419,26 @@ namespace simple {
 		Queue _presentQueue{};
 		ImageSamples _colorMsaaSamples{};
 		ImageSamples _depthMsaaSamples{};
-		Array<VkSemaphore, FRAMES_IN_FLIGHT> _frameReadyVkSemaphores{};
-		Array<VkSemaphore, FRAMES_IN_FLIGHT> _frameFinishedVkSemaphores{};
-		Array<VkFence, FRAMES_IN_FLIGHT> _inFlightVkFences{};
-		Array<VkCommandBuffer, FRAMES_IN_FLIGHT> _renderingVkCommandBuffers{};
+		FIFarray(VkSemaphore) _frameReadyVkSemaphores{};
+		FIFarray(VkSemaphore) _frameFinishedVkSemaphores{};
+		FIFarray(VkFence) _inFlightVkFences{};
+		FIFarray(VkCommandBuffer) _renderingVkCommandBuffers{};
 		VkSwapchainKHR _vkSwapchainKHR{};
 		VkExtent2D _swapchainVkExtent2D{};
 		VkSurfaceFormatKHR _vkSurfaceFormatKHR{};
 		VkPresentModeKHR _vkPresentModeKHR{};
-		Array<VkImage, FRAMES_IN_FLIGHT> _swapchainImages{};
-		Array<VkImageView, FRAMES_IN_FLIGHT> _swapchainImageViews{};
+		FIFarray(VkImage) _swapchainImages{};
+		FIFarray(VkImageView) _swapchainImageViews{};
+		ImageFormat _depthOnlyFormat{};
+		ImageFormat _stencilFormat{};
+		ImageFormat _depthStencilFormat{};
 
 		std::atomic<uint32_t> _activeRenderingContextCount{};
-		Array<RenderingContext*, max_active_rendering_context_count> _activeRenderingContexts{};
+		SimpleArray(RenderingContext*, max_active_rendering_context_count) _activeRenderingContexts{};
 		std::mutex _activeRenderingContextsMutex{};
+
+		DynamicArray<Pair<SwapchainRecreateCallback, Field<void*>::Reference>> _swapchainRecreateCallbacks{};
+		std::mutex _swapchainRecreateCallbacksMutex{};
 
 		uint32_t _currentRenderFrame{};
 
@@ -517,12 +483,27 @@ namespace simple {
 
 		void _CreateSwapchain();
 
-		void _RecreateSwapchain() {
+		inline void _RecreateSwapchain() {
 			vkDestroySwapchainKHR(_vkDevice, _vkSwapchainKHR, _vkAllocationCallbacks);
-			for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
+			for (uint32_t i = 0; i < FramesInFlight; i++) {
 				vkDestroyImageView(_vkDevice, _swapchainImageViews[i], _vkAllocationCallbacks);
 			}
 			_CreateSwapchain();
+			auto iter = _swapchainRecreateCallbacks.begin();
+			for (; iter != _swapchainRecreateCallbacks.end();) {
+				if (iter->second.IsNull()) {
+					iter = _swapchainRecreateCallbacks.Erase(iter);
+					continue;
+				}
+				iter->first(iter->second.GetField(), _swapchainVkExtent2D.width, _swapchainVkExtent2D.height, _swapchainImageViews);
+				++iter;
+			}
+		}
+
+		inline void _AddSwapchainRecreateCallback(SwapchainRecreateCallback callback, simple::Field<void*>& caller) {
+			assert(callback && "attempting to add swapchain recreate callback (function simple::Backend::_AddSwapchainRecreateCallback) with a function that's null!");
+			std::lock_guard<std::mutex> lock(_swapchainRecreateCallbacksMutex);
+			_swapchainRecreateCallbacks.EmplaceBack(callback, caller);
 		}
 
 		inline void _RenderCmds() {
@@ -614,9 +595,9 @@ namespace simple {
 					.layerCount = 1,
 					.viewMask = 0,
 					.colorAttachmentCount = context->_colorAttachmentCount,
-					.pColorAttachments = context->_pColorAttachments,
-					.pDepthAttachment = context->_pDepthAttachment,
-					.pStencilAttachment = context->_pStencilAttachment,
+					.pColorAttachments = context->GetColorAttachments(_currentRenderFrame),
+					.pDepthAttachment = &context->_pDepthAttachment->GetInfo(_currentRenderFrame),
+					.pStencilAttachment = &context->_pStencilAttachment->GetInfo(_currentRenderFrame),
 				};
 				vkCmdBeginRendering(renderCommandBuffer, &vkRenderingInfo);
 				for (RenderingContext::Pipeline& pipeline : _activeRenderingContexts[i]->_pipelines) {
@@ -673,7 +654,7 @@ namespace simple {
 			else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
 				return;
 			}
-			assert(imageIndex < FRAMES_IN_FLIGHT);
+			assert(imageIndex < FramesInFlight);
 			vkResetFences(_vkDevice, 1, &_inFlightVkFences[_currentRenderFrame]);
 
 			vkResetCommandBuffer(_renderingVkCommandBuffers[_currentRenderFrame], 0);
@@ -705,7 +686,7 @@ namespace simple {
 				.pSignalSemaphores = &_frameFinishedVkSemaphores[_currentRenderFrame],
 			};
 
-			simple::Array<VkSubmitInfo, 2> graphicsVkSubmitInfos = { graphicsVkSubmitInfo, renderVkSubmitInfo };
+			SimpleArray(VkSubmitInfo, 2) graphicsVkSubmitInfos = { graphicsVkSubmitInfo, renderVkSubmitInfo };
 
 			assert(Succeeded(vkQueueSubmit(_graphicsQueue.vkQueue, graphicsVkSubmitInfos.Size(), graphicsVkSubmitInfos.Data(), _inFlightVkFences[_currentRenderFrame]))
 				&& "failed to submit graphics command buffers (function vkQueueSubmit in simple::Backend::_Render)");
@@ -721,7 +702,7 @@ namespace simple {
 			};
 			result = vkQueuePresentKHR(_graphicsQueue.vkQueue, &vkPresentInfoKHR);
 
-			_currentRenderFrame = (_currentRenderFrame + 1) % FRAMES_IN_FLIGHT;
+			_currentRenderFrame = (_currentRenderFrame + 1) % FramesInFlight;
 
 			switch (result) {
 				case VK_SUCCESS:
@@ -748,7 +729,7 @@ namespace simple {
 				vkDestroyCommandPool(_vkDevice, pair.second._vkTransferCommandPool, _vkAllocationCallbacks);
 			}
 			vkDeviceWaitIdle(_vkDevice);
-			for (size_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
+			for (size_t i = 0; i < FramesInFlight; i++) {
 				vkDestroySemaphore(_vkDevice, _frameReadyVkSemaphores[i], _vkAllocationCallbacks);
 				vkDestroySemaphore(_vkDevice, _frameFinishedVkSemaphores[i], _vkAllocationCallbacks);
 				vkDestroyFence(_vkDevice, _inFlightVkFences[i], _vkAllocationCallbacks);
@@ -763,7 +744,6 @@ namespace simple {
 		friend class ImageView;
 		friend class CommandBuffer;
 	};
-
 
 	class Simple {
 	public:
@@ -803,6 +783,19 @@ namespace simple {
 			return glfwWindowShouldClose(_window.GetRawPointer());
 		}
 
+		inline bool AddSwapchainRecreateCallback(SwapchainRecreateCallback callback, simple::Field<void*>& caller) {
+			if (!callback) {
+				logError(this, "attempting to add swapchain recreate callback (function simple::Simple::AddSwapchainRecreateCallback) with a function that's null!");
+				return false;
+			}
+			_backend._AddSwapchainRecreateCallback(callback, caller);
+			return true;
+		}
+
+		inline void DestroyVkImageView(VkImageView vkImageView) {
+			vkDestroyImageView(_backend._vkDevice, vkImageView, _backend._vkAllocationCallbacks);
+		}
+
 #ifdef EDITOR
 		inline bool EditorUpdate() {
 			return true;
@@ -828,9 +821,8 @@ namespace simple {
 		friend class ImageView;
 	};
 	
-	typedef VkImageUsageFlags ImageUsages;
-	typedef VkImageAspectFlags ImageAspects;
-	typedef VkExtent3D ImageExtent;
+	typedef Flags ImageUsageFlags;
+	typedef Flags ImageAspectFlags;
 
 	enum class ImageTiling {
 		Optimal = VK_IMAGE_TILING_OPTIMAL,
@@ -870,13 +862,15 @@ namespace simple {
 	class Image {
 	public:
 
+		static constexpr inline VkComponentSwizzle component_swizzle_identity = VK_COMPONENT_SWIZZLE_IDENTITY;
+
 		inline Image() noexcept : _pEngine(nullptr) {}
 
 		inline Image(Simple& pEngine) noexcept : _pEngine(&pEngine) {}
 
 		inline Image(Image&& other) noexcept;
 
-		inline void Initialize(Simple& engine) {
+		inline void Init(Simple& engine) {
 			_pEngine = &engine;
 		}
 
@@ -884,25 +878,24 @@ namespace simple {
 			return _vkImage == VK_NULL_HANDLE;
 		}
 
-		inline bool CreateImage(ImageExtent extent, ImageFormat format, ImageUsages usage, 
-			ImageAspects aspect, uint32_t mipLevels = 1,
+		inline bool CreateImage(ImageExtent extent, ImageFormat format, ImageUsageFlags usage, uint32_t mipLevels = 1,
 			uint32_t arrayLayers = 1, ImageSampleBits samples = ImageSample_1Bit, 
-			ImageLayout initialLayout = ImageLayout::Undefined, ImageTiling tiling = ImageTiling::Optimal, 
+			ImageTiling tiling = ImageTiling::Optimal, 
 			ImageType type = ImageType::TwoD) noexcept {
 			if (!IsNull()) {
 				logError(this, "attempting to create image (function simple::Image::CreateImage) when an image is already created and not terminated!");
 				return false;
 			}
 			VkDeviceSize deviceSize = (VkDeviceSize)extent.width * extent.height;
-			return Succeeded(_CreateImage(nullptr, 0, static_cast<VkImageType>(type), static_cast<VkFormat>(format), 
+			return Succeeded(_CreateImage(nullptr, 0, static_cast<VkImageType>(type), static_cast<VkFormat>(format),
 				extent, mipLevels, arrayLayers, static_cast<VkSampleCountFlagBits>(samples), static_cast<VkImageTiling>(tiling), usage,
-				VK_SHARING_MODE_EXCLUSIVE, 0, nullptr, static_cast<VkImageLayout>(initialLayout)));
+				VK_SHARING_MODE_EXCLUSIVE, 0, nullptr, static_cast<VkImageLayout>(VK_IMAGE_LAYOUT_UNDEFINED), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT));
 		}
 
 		inline VkResult _CreateImage(const void* pNext, VkImageCreateFlags flags, VkImageType imageType, VkFormat format, 
 			VkExtent3D extent, uint32_t mipLevels, uint32_t arrayLayers, VkSampleCountFlagBits samples,
 			VkImageTiling tiling, VkImageUsageFlags usage, VkSharingMode sharingMode, uint32_t queueFamilyIndexCount,
-			const uint32_t* pQueueFamilyIndices, VkImageLayout initialLayout) {
+			const uint32_t* pQueueFamilyIndices, VkImageLayout initialLayout, VkMemoryPropertyFlags vkMemoryProperties) {
 			assert(IsNull() && "attempting to create image for simple::Image that already has a VkImage created!");
 			VkImageCreateInfo createInfo {
 				.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -933,6 +926,12 @@ namespace simple {
 				.pNext = nullptr,
 				.allocationSize = vkMemRequirements.size,
 			};
+			if (!vulkan::FindMemoryType(_pEngine->_backend._vkPhysicalDevice, vkMemRequirements.memoryTypeBits, vkMemoryProperties, vkAllocInfo.memoryTypeIndex)) {
+				logError(this, "failed to find memory type (function simple::vulkan::FindMemoryType) to allocate memory for simple::Image");
+				vkDestroyImage(_pEngine->_backend._vkDevice, _vkImage, _pEngine->_backend._vkAllocationCallbacks);
+				return VK_RESULT_MAX_ENUM;
+			}
+			vkResult = vkAllocateMemory(_pEngine->_backend._vkDevice, &vkAllocInfo, _pEngine->_backend._vkAllocationCallbacks, &_vkDeviceMemory);
 			if (!Succeeded(vkResult)) {
 				logError(this, "failed to allocate memory (function vkAllocateMemory) for simple::Image");
 				vkDestroyImage(_pEngine->_backend._vkDevice, _vkImage, _pEngine->_backend._vkAllocationCallbacks);
@@ -952,22 +951,22 @@ namespace simple {
 			return VK_SUCCESS;
 		}
 
-		inline VkImageView CreateImageView(ImageViewType viewType, const ImageComponentMapping& components, const ImageSubResourceRange& subresourceRange) const noexcept {
+		inline VkImageView CreateVkImageView(const ImageSubResourceRange& subresourceRange, ImageViewType viewType = ImageViewType::TwoD, const ImageComponentMapping& components = {}) const noexcept {
 			if (IsNull()) {
 				logError(this, "attempting to create VkImageView with simple::Image that's null!");
 				return VK_NULL_HANDLE;
 			}
 			VkImageView vkImageView;
-			if (Succeeded(_CreateImageView(nullptr, 0, static_cast<VkImageViewType>(viewType), components, subresourceRange, vkImageView))) {
+			if (Succeeded(_CreateVkImageView(nullptr, 0, static_cast<VkImageViewType>(viewType), components, subresourceRange, vkImageView))) {
 				return vkImageView;
 			}
 			return VK_NULL_HANDLE;
 		}
 
-		inline VkResult _CreateImageView(const void* pNext, VkImageViewCreateFlags flags, VkImageViewType viewType,
+		inline VkResult _CreateVkImageView(const void* pNext, VkImageViewCreateFlags flags, VkImageViewType viewType,
 			VkComponentMapping components, VkImageSubresourceRange subresourceRange, VkImageView& out) const {
-			assert(IsNull() && "attempting to create VkImageView with simple::Image that's null!");
-			VkImageViewCreateInfo createInfo {
+			assert(!IsNull() && "attempting to create VkImageView with simple::Image that's null!");
+			VkImageViewCreateInfo createInfo{
 				.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 				.pNext = pNext,
 				.flags = flags,
@@ -993,7 +992,7 @@ namespace simple {
 			_layout = ImageLayout::Undefined;
 			_extent = { 0, 0, 0 };
 			_arrayLayers = 0;
-			_format = ImageFormat::Undefined;
+			_format = ImageFormat::VK_FORMAT_UNDEFINED;
 		}
 
 		inline ~Image() noexcept {
