@@ -13,9 +13,9 @@ namespace simple {
 		typedef T* Iterator;
 		typedef const T* ConstIterator;
 
-		inline DynamicArray() : _allocator(), _capacity(0), _size(0), _pData(nullptr) {}
+		constexpr inline DynamicArray() : _allocator(), _capacity(0), _size(0), _pData(nullptr) {}
 
-		inline DynamicArray(Iterator begin, ConstIterator end) : _allocator(), _capacity(0), _size(0), _pData(nullptr) {
+		constexpr inline DynamicArray(Iterator begin, ConstIterator end) : _allocator(), _capacity(0), _size(0), _pData(nullptr) {
 			ptrdiff_t diff = end - begin;
 			assert(diff >= 0 && diff < UINT32_MAX);
 			Reserve(diff);
@@ -25,7 +25,7 @@ namespace simple {
 			}
 		}
 
-		inline DynamicArray(const DynamicArray& other) noexcept 
+		constexpr inline DynamicArray(const DynamicArray& other) noexcept 
 			: _allocator(), _capacity(other._capacity), _size(other._size), _pData(nullptr) {
 			if (other._capacity == 0) {
 				return;
@@ -36,14 +36,14 @@ namespace simple {
 			}
 		}
 
-		inline DynamicArray(DynamicArray&& other) noexcept 
+		constexpr inline DynamicArray(DynamicArray&& other) noexcept 
 			: _allocator(), _capacity(other._capacity), _size(other._size), _pData(other._pData) {
 			other._capacity = 0;
 			other._size = 0;
 			other._pData = nullptr;
 		}
 
-		inline DynamicArray(uint32_t size) : _allocator(), _capacity(0), _size(0), _pData(nullptr) {
+		constexpr inline DynamicArray(uint32_t size) : _allocator(), _capacity(0), _size(0), _pData(nullptr) {
 			Resize(size);
 		}
 
@@ -59,7 +59,7 @@ namespace simple {
 			return _pData;
 		}
 
-		inline DynamicArray& Reserve(uint32_t capacity) {
+		constexpr inline DynamicArray& Reserve(uint32_t capacity) {
 			if (capacity <= _capacity || capacity == 0) {
 				return *this;
 			}
@@ -77,7 +77,7 @@ namespace simple {
 			return *this;
 		}
 
-		inline DynamicArray& Resize(uint32_t size) {
+		constexpr inline DynamicArray& Resize(uint32_t size) {
 			if (size > _capacity) {
 				Reserve(size);
 			}
@@ -88,7 +88,7 @@ namespace simple {
 			return *this;
 		}
 
-		inline T& PushBack(const T& value) {
+		constexpr inline T& PushBack(const T& value) {
 			if (_size >= _capacity) {
 				Reserve((_capacity ? _capacity : 1) * 2);
 			}
@@ -97,7 +97,7 @@ namespace simple {
 			return *Back();
 		}
 
-		inline Iterator Insert(Iterator where, const T& value) {
+		constexpr inline Iterator Insert(Iterator where, const T& value) {
 			if (where == &_pData[_size]) {
 				return pushBack(value);
 			}
@@ -113,7 +113,7 @@ namespace simple {
 		}
 
 		template<typename... Args>
-		inline T& EmplaceBack(Args&&... args) {
+		constexpr inline T& EmplaceBack(Args&&... args) {
 			if (_size >= _capacity) {
 				Reserve((_capacity ? _capacity : 1) * 2);
 			}
@@ -122,7 +122,7 @@ namespace simple {
 		}
 
 		template<typename... Args>
-		inline Iterator Emplace(Iterator where, Args&&... args) {
+		constexpr inline Iterator Emplace(Iterator where, Args&&... args) {
 			if (where == &_pData[_size]) {
 				return emplaceBack(std::forward<Args>(args)...);
 			}
@@ -137,25 +137,25 @@ namespace simple {
 			return where;
 		}
 
-		inline Iterator Erase(Iterator where) {
+		constexpr inline Iterator Erase(Iterator where) {
 			Iterator iter = where;
-			size_t index = iter - &_pData[0];
-			if (iter == &_pData[_size]) {
-			}
+			ptrdiff_t ptrdiff = iter - &_pData[0];
+			assert(ptrdiff < _size && ptrdiff >= 0
+				&& "attempting to erase from simple::DynamicArray (function simple::DynamicArray::Erase) with an iterator that doesn't belong to the simple::DynamicArray");
 			while (iter != &_pData[_size - 1]) {
 				_allocator.destroy(iter);
 				_allocator.construct(iter, std::move(*(iter + 1)));
 				++iter;
 			}
 			--_size;
-			return &_pData[index];
+			return &_pData[ptrdiff];
 		}
 
-		inline Iterator Back() {
+		constexpr inline Iterator Back() {
 			return &_pData[_size - 1];
 		}
 
-		inline void Clear() {
+		constexpr inline void Clear() {
 			for (size_t i = 0; i < _size; i++) {
 				_allocator.destroy(&_pData[i]);
 			}
@@ -165,7 +165,7 @@ namespace simple {
 			_pData = nullptr;
 		}
 
-		inline Iterator Find(const T& value) {
+		constexpr inline Iterator Find(const T& value) {
 			Iterator begin = &_pData[0];
 			for (; begin != &_pData[_size];) {
 				if (*begin == value) {
@@ -176,7 +176,7 @@ namespace simple {
 			return begin;
 		}
 
-		inline DynamicArray& Reverse() {
+		constexpr inline DynamicArray& Reverse() {
 			if (!_size) {
 				return *this;
 			}
@@ -189,15 +189,15 @@ namespace simple {
 			return *this;
 		}
 
-		inline Iterator begin() const {
+		constexpr inline Iterator begin() const {
 			return &_pData[0];
 		}
 
-		inline ConstIterator end() const {
+		constexpr inline ConstIterator end() const {
 			return &_pData[_size];
 		}
 
-		~DynamicArray() noexcept {
+		constexpr ~DynamicArray() noexcept {
 			for (size_t i = 0; i < _size; i++) {
 				_allocator.destroy(&_pData[i]);
 			}
@@ -207,12 +207,12 @@ namespace simple {
 			_pData = nullptr;
 		}
 
-		T& operator[](size_t index) const {
+		constexpr T& operator[](size_t index) const {
 			assert(index < _size && "attempting to access index that's out side the bounds of dyn_array!");
 			return _pData[index];
 		}
 
-		DynamicArray& operator=(const DynamicArray& other) {
+		constexpr DynamicArray& operator=(const DynamicArray& other) {
 			_capacity = other._capacity;
 			_size = other._size;
 			_pData = _allocator.allocate(_capacity);
