@@ -200,7 +200,7 @@ namespace simple {
 
 	Backend::Backend(Simple& engine) : _engine(engine) {
 
-		_mainThread._stdThreadID = std::this_thread::get_id();
+		_mainThread._ID = std::this_thread::get_id();
 
 		uint32_t glfwRequiredExtensionsCount{};
 		const char** glfwRequiredExtensions = glfwGetRequiredInstanceExtensions(&glfwRequiredExtensionsCount);
